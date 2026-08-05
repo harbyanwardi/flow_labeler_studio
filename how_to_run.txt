@@ -1,0 +1,12 @@
+# Activate Virtual Environment
+.\backend\venv\Scripts\Activate.ps1
+
+# 1. Run Development Web Server:
+python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
+
+# 2. Run Native Desktop Window App:
+python run_desktop.py
+
+# 3. Build Windows Executable (.exe):
+.\build_exe.ps1
+

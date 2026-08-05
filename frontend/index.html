@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>APIFlow Labeler</title>
+  <meta name="description" content="AI-assisted dataset annotation and versioned export tool.">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+  <div class="app-shell">
+
+    <!-- ── TOPBAR ─────────────────────────────────────────────────────── -->
+    <header class="topbar">
+      <div class="logo">
+        <div class="logo-mark">▲</div>
+        APIFlow <span class="logo-sub">Labeler</span>
+      </div>
+      <div class="topbar-center" id="topbarBreadcrumb"></div>
+      <div class="topbar-actions" id="topbarActions"></div>
+    </header>
+
+    <div class="view-content">
+
+      <!-- ═══════════════════════════════════════════════════════════════ -->
+      <!-- SCREEN 0 — PROJECTS: Select or Create Project                  -->
+      <!-- ═══════════════════════════════════════════════════════════════ -->
+      <div id="projectsScreen" style="display:none;">
+        <!-- Hero -->
+        <div class="projects-hero">
+          <div class="projects-hero-title">Projects</div>
+          <div class="projects-hero-sub">Select a project workspace to get started, or create a new one</div>
+        </div>
+        <!-- Toolbar -->
+        <div class="projects-toolbar">
+          <span class="projects-toolbar-left">All Projects</span>
+          <button class="btn btn-primary" onclick="openNewProjectModal()">+ New Project</button>
+        </div>
+        <!-- Scrollable grid -->
+        <div class="projects-body">
+          <div class="projects-grid" id="projectsGrid">
+            <!-- rendered by JS -->
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════════════════════════════════════════════════════════════ -->
+      <!-- SCREEN 1 — HOME: Batches (left) + Datasets (right)             -->
+      <!-- ═══════════════════════════════════════════════════════════════ -->
+      <div id="homeScreen" style="display:none;">
+
+        <!-- LEFT: Batches -->
+        <div class="home-batches">
+          <div class="home-panel-header">
+            <h1 class="home-panel-title">Batches <span>Upload &amp; annotate image sets</span></h1>
+            <div style="display:flex; gap:8px;">
+              <button class="btn" onclick="openImportModalHome()">Import Roboflow Dataset</button>
+              <button class="btn btn-primary" onclick="openNewBatchModal()">+ New Batch</button>
+            </div>
+          </div>
+          <div class="batches-grid" id="batchesGrid">
+            <!-- rendered by JS -->
+          </div>
+        </div>
+
+        <!-- RIGHT: Datasets -->
+        <div class="home-datasets">
+          <div class="section-header">
+            <span class="section-title">🗂 Datasets &amp; Versions</span>
+            <button class="btn btn-sm btn-primary" onclick="openNewDatasetModal()">+ Dataset</button>
+          </div>
+          <div id="datasetAccordions">
+            <div class="empty-state">
+              <div class="empty-icon">📦</div>No datasets yet.
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- ═══════════════════════════════════════════════════════════════ -->
+      <!-- SCREEN 2 — ANNOTATE                                            -->
+      <!-- ═══════════════════════════════════════════════════════════════ -->
+      <div id="annotateScreen">
+
+        <!-- LEFT: image panel -->
+        <aside class="sidebar">
+          <div class="sidebar-section">
+            <div style="margin-bottom:10px;">
+              <span class="sidebar-section-title">Upload Images</span>
+            </div>
+            <div class="upload-zone" id="dropZone" onclick="triggerFileUpload()">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" />
+              </svg>
+              <div class="uz-title">Drop files or folder here</div>
+              <div class="uz-sub">or click to select files</div>
+            </div>
+            <div class="upload-btns">
+              <button class="btn btn-sm" onclick="triggerFolderUpload()">📁 Folder</button>
+              <button class="btn btn-sm" onclick="triggerFileUpload()">🖼 Files</button>
+            </div>
+            <input type="file" id="fileInput" multiple accept="image/*" style="display:none;">
+            <input type="file" id="folderInput" multiple accept="image/*" webkitdirectory style="display:none;">
+          </div>
+
+          <div class="sidebar-section">
+            <span class="sidebar-section-title" style="display:block;margin-bottom:8px;">Images in Batch</span>
+            <input type="text" id="imgSearch" class="input-search" placeholder="Search filename…"
+              oninput="renderImageList()">
+          </div>
+
+          <div class="sidebar-scroll" id="imageListContainer">
+            <div class="empty-state">
+              <div class="empty-icon">🖼️</div>No images yet.
+            </div>
+          </div>
+        </aside>
+
+        <!-- CENTER: canvas -->
+        <main class="workspace">
+          <div class="canvas-toolbar">
+            <div class="tool-group">
+              <button id="toolBbox" class="tool-btn active" onclick="setMode('bbox')" title="[B]">BBox</button>
+              <button id="toolPolygon" class="tool-btn" onclick="setMode('polygon')" title="[P]">Poly</button>
+              <button id="toolPan" class="tool-btn" onclick="setMode('pan')" title="[H]">Pan</button>
+              <div class="toolbar-sep"></div>
+              <button class="tool-btn" onclick="resetView()" title="Fit [R]">⟲</button>
+              <button class="tool-btn btn-ghost" onclick="clearAllAnnotations()" title="Clear all">🗑</button>
+            </div>
+             <div class="class-select-wrap">
+              <label>Class</label>
+              <select id="classSelect" onchange="setCurrentClass(this.value)"></select>
+            </div>
+            <div class="toolbar-sep"></div>
+            <button id="btnNullLabel" class="btn btn-sm btn-ghost" onclick="toggleNullLabel()" title="Mark as Empty/Null labeled" style="border: 1px dashed var(--border-hi);">✓ Null Label</button>
+          </div>
+
+          <div class="canvas-wrap" id="canvasWrap" tabindex="0">
+            <canvas id="canvas"></canvas>
+            <div class="canvas-hints">
+              <div><kbd>B</kbd>/<kbd>P</kbd>/<kbd>H</kbd> BBox·Poly·Pan</div>
+              <div><kbd>Scroll</kbd> Zoom &nbsp;<kbd>Right-drag</kbd> Pan</div>
+              <div><kbd>← →</kbd> Prev/Next &nbsp;<kbd>Del</kbd> Remove</div>
+              <div><kbd>Esc</kbd> Cancel drawing</div>
+            </div>
+          </div>
+
+          <div class="workspace-footer">
+            <div class="footer-nav">
+              <button class="btn btn-sm" onclick="navPrev()">◄ Prev</button>
+              <span class="footer-info" id="imgCounter">0 / 0</span>
+              <button class="btn btn-sm" onclick="navNext()">Next ►</button>
+            </div>
+            <span class="footer-info" id="imgDimInfo">—</span>
+          </div>
+        </main>
+
+        <!-- RIGHT: classes + annotations -->
+        <aside class="sidebar sidebar-right">
+          <div class="sidebar-section">
+            <span class="sidebar-section-title" style="display:block;margin-bottom:9px;">Classes</span>
+            <div id="classListEl"></div>
+            <div class="add-cls-form">
+              <input type="text" id="newClassInput" class="add-cls-input" placeholder="New class…">
+              <button class="btn btn-sm btn-primary" onclick="handleAddClass()">Add</button>
+            </div>
+          </div>
+          <div class="sidebar-section" style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+            <span class="sidebar-section-title" style="display:block;margin-bottom:8px;">Labels on Image</span>
+            <div class="sidebar-scroll" id="annListEl">
+              <div class="empty-state">
+                <div class="empty-icon">✏️</div>No labels yet.
+              </div>
+            </div>
+          </div>
+        </aside>
+
+      </div><!-- /#annotateScreen -->
+
+      <!-- ═══════════════════════════════════════════════════════════════ -->
+      <!-- SCREEN 3 — DATASET VERSION VIEW                                 -->
+      <!-- ═══════════════════════════════════════════════════════════════ -->
+      <div id="versionScreen">
+
+        <!-- Main area: image grid -->
+        <div class="version-main">
+          <div class="version-header">
+            <div class="version-header-left">
+              <div>
+                <div class="version-title" id="versionTitle">Version</div>
+                <div class="version-subtitle" id="versionSubtitle">—</div>
+              </div>
+            </div>
+            <button class="btn btn-amber" id="exportVersionBtn" onclick="openExportModal()">
+              ⬇ Export Version
+            </button>
+          </div>
+
+          <!-- Stats bar -->
+          <div class="version-stats-bar">
+            <div class="vstat">
+              <span class="vstat-val" id="vstatImages">0</span>
+              <span class="vstat-lbl">Total Images</span>
+            </div>
+            <div class="vstat-sep"></div>
+            <div class="vstat">
+              <span class="vstat-val" id="vstatExports" style="color:var(--green)">0</span>
+              <span class="vstat-lbl">Exports</span>
+            </div>
+            <div class="vstat-sep"></div>
+            <div class="vstat">
+              <span class="vstat-val" id="vstatStatus" style="font-size:14px;">—</span>
+              <span class="vstat-lbl">Status</span>
+            </div>
+          </div>
+
+          <!-- Image grid -->
+          <div class="version-img-grid" id="versionImgGrid">
+            <div class="empty-state" style="grid-column:1/-1;">
+              <div class="empty-icon">🖼️</div>
+              No images added yet. Go to a batch and click "Add to Dataset".
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: export log -->
+        <aside class="version-sidebar">
+          <div class="version-sidebar-header">Export Log</div>
+          <div class="version-sidebar-scroll" id="exportLogList">
+            <div class="empty-state">
+              <div class="empty-icon">📋</div>No exports yet.
+            </div>
+          </div>
+        </aside>
+
+      </div><!-- /#versionScreen -->
+
+    </div><!-- /.view-content -->
+  </div><!-- /.app-shell -->
+
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- MODAL: NEW BATCH                                                   -->
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <div class="modal-backdrop" id="newBatchModal">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">Create New Batch</span>
+        <button class="modal-close" onclick="closeModal('newBatchModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">Batch Name</label>
+          <input type="text" id="newBatchName" class="form-input" placeholder="e.g. ProductionLine_July25"
+            maxlength="80">
+        </div>
+        <p style="font-size:12px;color:var(--text-3);line-height:1.6;">
+          A batch is a group of images uploaded together. Annotate each batch, then <strong
+            style="color:var(--text-2)">Add images to a Dataset version</strong> to collect them for export.
+        </p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeModal('newBatchModal')">Cancel</button>
+        <button class="btn btn-primary" onclick="createBatch()">Create &amp; Open</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- MODAL: NEW DATASET                                                 -->
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <div class="modal-backdrop" id="newDatasetModal">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">Create New Dataset</span>
+        <button class="modal-close" onclick="closeModal('newDatasetModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">Dataset Name</label>
+          <input type="text" id="newDatasetName" class="form-input" placeholder="e.g. DefectDetection_v1"
+            maxlength="80">
+        </div>
+        <p style="font-size:12px;color:var(--text-3);line-height:1.6;">
+          A dataset collects annotated images from multiple batches into versions. Each version can be exported
+          independently with its own train/val/test split.
+        </p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeModal('newDatasetModal')">Cancel</button>
+        <button class="btn btn-primary" onclick="createDataset()">Create Dataset</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- MODAL: ADD TO DATASET (from annotate screen)                       -->
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <div class="modal-backdrop" id="addToDatasetModal">
+    <div class="modal modal-wide">
+      <div class="modal-header">
+        <span class="modal-title">Add Annotated Images to Dataset</span>
+        <button class="modal-close" onclick="closeModal('addToDatasetModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+
+        <!-- Step 1: pick dataset + version -->
+        <div class="form-group">
+          <label class="form-label">Select Dataset &amp; Version</label>
+          <div id="addToDsDatasetList"
+            style="display:flex;flex-direction:column;gap:6px;max-height:160px;overflow-y:auto;">
+            <!-- rendered by JS -->
+          </div>
+          <button class="btn btn-sm btn-ghost" style="margin-top:6px;" onclick="openNewDatasetModal()">+ Create New
+            Dataset</button>
+        </div>
+
+        <!-- Step 2: images to add -->
+        <div class="form-group" id="addImgSelectionGroup">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+            <label class="form-label" style="margin:0;">Select Images (annotated only)</label>
+            <label style="font-size:11px;color:var(--accent-hi);cursor:pointer;">
+              <input type="checkbox" id="selectAllAddImages" onchange="toggleSelectAllAddImages(this.checked)"
+                style="accent-color:var(--accent);margin-right:4px;">
+              All
+            </label>
+          </div>
+          <div class="add-img-list" id="addImgList">
+            <!-- rendered by JS -->
+          </div>
+        </div>
+        
+        <!-- Step 3: Augmentations -->
+        <div class="form-group" style="margin-top: 15px;">
+          <label class="form-label" style="margin-bottom:6px;">Augmentations (Generates extra copies)</label>
+          <div style="display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; color: var(--text-2);">
+            <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+              <input type="checkbox" class="aug-checkbox" value="flip_h" style="accent-color:var(--accent);"> Flip Horizontal
+            </label>
+            <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+              <input type="checkbox" class="aug-checkbox" value="flip_v" style="accent-color:var(--accent);"> Flip Vertical
+            </label>
+            <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+              <input type="checkbox" class="aug-checkbox" value="rot_90" style="accent-color:var(--accent);"> Rotate 90°
+            </label>
+            <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+              <input type="checkbox" class="aug-checkbox" value="bright_up" style="accent-color:var(--accent);"> Brightness +
+            </label>
+            <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+              <input type="checkbox" class="aug-checkbox" value="bright_dn" style="accent-color:var(--accent);"> Brightness -
+            </label>
+            <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+              <input type="checkbox" class="aug-checkbox" value="sat_up" style="accent-color:var(--accent);"> Saturation +
+            </label>
+            <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+              <input type="checkbox" class="aug-checkbox" value="sat_dn" style="accent-color:var(--accent);"> Saturation -
+            </label>
+          </div>
+        </div>
+
+        <div id="addImgSummary" style="font-size:12px;color:var(--text-2);"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeModal('addToDatasetModal')">Cancel</button>
+        <button class="btn btn-primary" id="confirmAddToDatasetBtn" onclick="confirmAddToDataset()">
+          Add to Dataset
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- MODAL: EXPORT VERSION                                              -->
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <div class="modal-backdrop" id="exportModal">
+    <div class="modal modal-wide">
+      <div class="modal-header">
+        <span class="modal-title">Export Dataset Version</span>
+        <button class="modal-close" onclick="closeModal('exportModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">Export Format</label>
+          <select id="exportFormat" class="form-select">
+            <option value="yolov11_detect">YOLOv11 — Detection (bounding boxes + data.yaml)</option>
+            <option value="yolov11_segment">YOLOv11 — Segmentation (polygons + data.yaml)</option>
+            <option value="coco">COCO JSON — _annotations.coco.json per split</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Train / Validation / Test Split</label>
+          <div class="split-row">
+            <span class="split-label" style="color:var(--green);">Train</span>
+            <input type="range" class="split-slider" id="sliderTrain" min="0" max="100" value="70"
+              oninput="onSplitChange()">
+            <span class="split-val" id="valTrain">70%</span>
+          </div>
+          <div class="split-row">
+            <span class="split-label" style="color:var(--accent-hi);">Valid</span>
+            <input type="range" class="split-slider" id="sliderVal" min="0" max="100" value="20"
+              oninput="onSplitChange()">
+            <span class="split-val" id="valVal">20%</span>
+          </div>
+          <div class="split-row">
+            <span class="split-label" style="color:var(--amber);">Test</span>
+            <input type="range" class="split-slider" id="sliderTest" min="0" max="100" value="10"
+              oninput="onSplitChange()">
+            <span class="split-val" id="valTest">10%</span>
+          </div>
+          <p class="split-hint" id="splitHint">Total: 100% ✓</p>
+        </div>
+
+        <div id="exportVersionInfo"
+          style="font-size:12px;color:var(--text-3);line-height:1.7;background:var(--bg-2);border:1px solid var(--border);border-radius:6px;padding:10px 13px;">
+          —
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeModal('exportModal')">Cancel</button>
+        <button class="btn btn-amber" id="exportDownloadBtn" onclick="doExport()">
+          ⬇ Generate &amp; Download
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- MODAL: IMPORT DATASET                                               -->
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <div class="modal-backdrop" id="importDatasetModal">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">Import Roboflow Dataset (COCO ZIP)</span>
+        <button class="modal-close" onclick="closeModal('importDatasetModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">Batch Name</label>
+          <input type="text" id="importBatchName" class="form-input" placeholder="e.g. Imported_Roboflow_Dataset"
+            maxlength="80">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Upload ZIP File</label>
+          <input type="file" id="importZipFile" class="form-input" accept=".zip">
+        </div>
+        <p style="font-size:12px;color:var(--text-3);line-height:1.6;">
+          Upload a ZIP export containing a COCO JSON file (e.g. <code>_annotations.coco.json</code>) and images. The
+          application will automatically import and convert the annotations.
+        </p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeModal('importDatasetModal')">Cancel</button>
+        <button class="btn btn-primary" id="confirmImportDatasetBtn" onclick="doImportDataset()">Import</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- MODAL: NEW PROJECT                                                 -->
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <div class="modal-backdrop" id="newProjectModal">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">Create New Project</span>
+        <button class="modal-close" onclick="closeModal('newProjectModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">Project Name</label>
+          <input type="text" id="newProjectName" class="form-input" placeholder="e.g. Defect Detection Project"
+            maxlength="80">
+        </div>
+        <p style="font-size:12px;color:var(--text-3);line-height:1.6;">
+          A project organizes batches of images and versioned datasets.
+        </p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeModal('newProjectModal')">Cancel</button>
+        <button class="btn btn-primary" onclick="createProject()">Create Project</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SCRIPTS -->
+  <script src="/static/state.js"></script>
+  <script src="/static/canvas.js"></script>
+</body>
+
+</html>

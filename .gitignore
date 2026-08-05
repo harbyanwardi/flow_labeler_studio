@@ -1,0 +1,32 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Model files
+backend/models/*.pth
+backend/models/*.pt
+backend/models/*.torchscript
+
+# Virtual Environment
+venv/
+
+# Environment Variables (PENTING!)
+.env
+
+# Datasets
+datasets/exports/
+datasets/labeled/
+datasets/raw/
+
+# Storage
+backend/storage/annotations/
+backend/storage/batches/
+backend/storage/datasets/
+backend/storage/images/
+backend/storage/projects/
+
+storage/images/
+build/
+dist/
