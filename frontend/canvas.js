@@ -2,7 +2,10 @@
 // ────────────────────────────────────────────────────────────────────
 "use strict";
 
-const API = window.location.origin;
+const BASE_PATH = window.location.pathname.endsWith('/') 
+  ? window.location.pathname.slice(0, -1) 
+  : window.location.pathname;
+const API = window.location.origin + BASE_PATH;
 
 // ── canvas DOM ──────────────────────────────────────────────────────
 const canvas = document.getElementById("canvas");
