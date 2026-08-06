@@ -16,17 +16,26 @@ venv/
 .env
 
 # Datasets
-datasets/exports/
-datasets/labeled/
-datasets/raw/
+datasets/exports/*
+!datasets/exports/.gitkeep
+datasets/labeled/*
+!datasets/labeled/.gitkeep
+datasets/raw/*
+!datasets/raw/.gitkeep
 
 # Storage
-backend/storage/annotations/
-backend/storage/batches/
-backend/storage/datasets/
-backend/storage/images/
-backend/storage/projects/
+backend/storage/annotations/*
+!backend/storage/annotations/.gitkeep
+backend/storage/batches/*
+!backend/storage/batches/.gitkeep
+backend/storage/datasets/*
+!backend/storage/datasets/.gitkeep
+backend/storage/images/*
+!backend/storage/images/.gitkeep
+backend/storage/projects/*
+!backend/storage/projects/.gitkeep
 
-storage/images/
+storage/images/*
+!storage/images/.gitkeep
 build/
 dist/
