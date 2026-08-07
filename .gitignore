@@ -11,6 +11,13 @@ backend/models/*.torchscript
 
 # Virtual Environment
 venv/
+*_venv/
+.venv/
+env/
+
+# Logs
+logs/
+*.log
 
 # Environment Variables (PENTING!)
 .env
