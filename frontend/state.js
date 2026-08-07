@@ -68,7 +68,7 @@ function getRandomColor() {
 }
 
 function addClass(className) {
-  const cleaned = className.trim().toLowerCase().replace(/\s+/g, "_");
+  const cleaned = className.trim().toLowerCase();
   if (cleaned && !state.classes.includes(cleaned)) {
     state.classes.push(cleaned);
     state.classColors[cleaned] = getRandomColor();
