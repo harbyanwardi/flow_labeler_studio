@@ -20,6 +20,9 @@ const state = {
   // ── IMAGE STATE (inside active batch) ─────────────────────────────
   images: [],
   currentImageIndex: -1,
+  currentPage: 1,
+  limit: 10,
+  totalImages: 0,
 
   // ── ANNOTATION ────────────────────────────────────────────────────
   annotations: [],

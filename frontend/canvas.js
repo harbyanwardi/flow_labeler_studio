@@ -522,8 +522,11 @@ function openBatch(batchId) {
   state.activeBatchId = batchId;
   state.images = [];
   state.currentImageIndex = -1;
+  state.currentPage = 1;
   state.annotations = [];
   imgObj = null;
+  const searchEl = document.getElementById("imgSearch");
+  if (searchEl) searchEl.value = "";
   showScreen("annotate");
   setMode("bbox");
   updateClassSelect();
@@ -899,7 +902,27 @@ async function doExport() {
 // ════════════════════════════════════════════════════════════════════
 // BATCH IMAGE OPERATIONS
 // ════════════════════════════════════════════════════════════════════
-async function fetchBatchImages() {
+let searchTimeout = null;
+function handleSearchInput() {
+  clearTimeout(searchTimeout);
+  searchTimeout = setTimeout(() => {
+    state.currentPage = 1;
+    fetchBatchImages(0);
+  }, 300);
+}
+
+async function changePage(dir) {
+  const maxPage = Math.ceil(state.totalImages / state.limit) || 1;
+  let newPage = state.currentPage + dir;
+  if (newPage < 1) newPage = 1;
+  if (newPage > maxPage) newPage = maxPage;
+  if (newPage !== state.currentPage) {
+    state.currentPage = newPage;
+    await fetchBatchImages(0);
+  }
+}
+
+async function fetchBatchImages(targetIndexAfterLoad = null) {
   if (!state.activeBatchId) return;
   const el = document.getElementById("imageListContainer");
   if (el) {
@@ -909,12 +932,56 @@ async function fetchBatchImages() {
         <div class="loading-text">Loading images...</div>
       </div>`;
   }
+  
+  const searchEl = document.getElementById("imgSearch");
+  const query = searchEl ? searchEl.value.trim() : "";
+  
   try {
-    const r = await fetch(`${API}/batches/${state.projectId}/batches/${state.activeBatchId}/images`);
-    state.images = await r.json();
-  } catch { state.images = []; }
+    const r = await fetch(`${API}/batches/${state.projectId}/batches/${state.activeBatchId}/images?page=${state.currentPage}&limit=${state.limit}&search=${encodeURIComponent(query)}`);
+    const data = await r.json();
+    state.images = data.images || [];
+    state.totalImages = data.total || 0;
+  } catch (e) {
+    console.error(e);
+    state.images = [];
+    state.totalImages = 0;
+  }
+  
+  const pagEl = document.getElementById("paginationControls");
+  const infoEl = document.getElementById("pageInfo");
+  if (pagEl && infoEl) {
+    if (state.totalImages > state.limit) {
+      pagEl.style.display = "flex";
+      const maxPage = Math.ceil(state.totalImages / state.limit) || 1;
+      infoEl.textContent = `${state.currentPage}/${maxPage}`;
+    } else {
+      pagEl.style.display = "none";
+    }
+  }
+
   renderImageList();
-  if (state.images.length > 0 && state.currentImageIndex === -1) loadImage(0);
+  
+  if (state.images.length > 0) {
+    if (targetIndexAfterLoad === null) {
+      if (state.currentImageIndex === -1) {
+        loadImage(0);
+      } else {
+        const exists = state.images.some((_, i) => i === state.currentImageIndex);
+        if (!exists) loadImage(0);
+      }
+    } else if (targetIndexAfterLoad === -1) {
+      loadImage(state.images.length - 1);
+    } else {
+      loadImage(targetIndexAfterLoad);
+    }
+  } else {
+    state.currentImageIndex = -1;
+    imgObj = null;
+    state.annotations = [];
+    redraw();
+    const counter = document.getElementById("imgCounter");
+    if (counter) counter.textContent = "0 / 0";
+  }
 }
 
 async function uploadFiles(fileList) {
@@ -940,38 +1007,32 @@ async function uploadFiles(fileList) {
 async function deleteImage(filename) {
   if (!confirm(`Delete "${filename}" and its annotations?`)) return;
   await fetch(`${API}/batches/${state.projectId}/batches/${state.activeBatchId}/images/${encodeURIComponent(filename)}`, { method: "DELETE" });
+  
   const idx = state.images.findIndex(i => i.filename === filename);
-  state.images.splice(idx, 1);
-  if (state.currentImageIndex >= state.images.length) state.currentImageIndex = state.images.length - 1;
-  renderImageList();
-  if (state.images.length > 0) loadImage(state.currentImageIndex >= 0 ? state.currentImageIndex : 0);
-  else {
-    imgObj = null; state.annotations = []; state.currentImageIndex = -1;
-    const counter = document.getElementById("imgCounter");
-    if (counter) counter.textContent = "0 / 0";
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  let nextIdx = idx;
+  if (nextIdx >= state.images.length - 1) {
+    nextIdx = state.images.length - 2;
   }
+  if (nextIdx < 0) nextIdx = 0;
+  
+  await fetchBatchImages(nextIdx);
 }
-
 function renderImageList() {
   const el = document.getElementById("imageListContainer");
-  const searchEl = document.getElementById("imgSearch");
   if (!el) return;
-  const query = (searchEl ? searchEl.value : "").toLowerCase();
   el.innerHTML = "";
 
-  const filtered = state.images.filter(i => i.filename.toLowerCase().includes(query));
+  const filtered = state.images;
   if (!filtered.length) {
     el.innerHTML = `<div class="empty-state"><div class="empty-icon">🖼️</div>No images.</div>`;
     return;
   }
 
-  filtered.forEach(img => {
-    const origIdx = state.images.findIndex(i => i.filename === img.filename);
-    const active = origIdx === state.currentImageIndex;
+  filtered.forEach((img, idx) => {
+    const active = idx === state.currentImageIndex;
     const row = document.createElement("div");
     row.className = `img-item${active ? " active" : ""}`;
-    row.onclick = () => loadImage(origIdx);
+    row.onclick = () => loadImage(idx);
 
     const thumb = document.createElement("img");
     thumb.className = "img-thumb";
@@ -1103,13 +1164,37 @@ function updateNullLabelButton() {
 }
 
 
-function navPrev() {
-  const i = (state.currentImageIndex - 1 + state.images.length) % state.images.length;
-  loadImage(i);
+async function navPrev() {
+  if (state.images.length === 0) return;
+  let i = state.currentImageIndex - 1;
+  if (i < 0) {
+    if (state.currentPage > 1) {
+      state.currentPage--;
+      await fetchBatchImages(-1);
+    } else {
+      const maxPage = Math.ceil(state.totalImages / state.limit) || 1;
+      state.currentPage = maxPage;
+      await fetchBatchImages(-1);
+    }
+  } else {
+    loadImage(i);
+  }
 }
-function navNext() {
-  const i = (state.currentImageIndex + 1) % state.images.length;
-  loadImage(i);
+async function navNext() {
+  if (state.images.length === 0) return;
+  let i = state.currentImageIndex + 1;
+  if (i >= state.images.length) {
+    const maxPage = Math.ceil(state.totalImages / state.limit) || 1;
+    if (state.currentPage < maxPage) {
+      state.currentPage++;
+      await fetchBatchImages(0);
+    } else {
+      state.currentPage = 1;
+      await fetchBatchImages(0);
+    }
+  } else {
+    loadImage(i);
+  }
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1348,7 +1433,8 @@ function fitImage() {
   if (!imgObj) return;
   const cw = (canvasWrap && canvasWrap.clientWidth) || 800;
   const ch = (canvasWrap && canvasWrap.clientHeight) || 600;
-  canvas.width = imgObj.naturalWidth; canvas.height = imgObj.naturalHeight;
+  canvas.width = cw; 
+  canvas.height = ch;
   const s = Math.min((cw - 40) / imgObj.naturalWidth, (ch - 40) / imgObj.naturalHeight, 1);
   view.scale = s;
   view.offsetX = (cw - imgObj.naturalWidth * s) / 2;

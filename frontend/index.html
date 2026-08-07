@@ -107,9 +107,16 @@
           </div>
 
           <div class="sidebar-section">
-            <span class="sidebar-section-title" style="display:block;margin-bottom:8px;">Images in Batch</span>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+              <span class="sidebar-section-title">Images in Batch</span>
+              <div id="paginationControls" style="display:none;gap:6px;align-items:center;font-size:12px;">
+                <button class="btn" style="padding:2px 8px;font-size:11px;min-height:unset;" onclick="changePage(-1)">&lt;</button>
+                <span id="pageInfo" style="color:var(--text-2);font-weight:500;">1/1</span>
+                <button class="btn" style="padding:2px 8px;font-size:11px;min-height:unset;" onclick="changePage(1)">&gt;</button>
+              </div>
+            </div>
             <input type="text" id="imgSearch" class="input-search" placeholder="Search filename…"
-              oninput="renderImageList()">
+              oninput="handleSearchInput()">
           </div>
 
           <div class="sidebar-scroll" id="imageListContainer">

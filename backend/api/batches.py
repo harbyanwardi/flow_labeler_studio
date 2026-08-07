@@ -247,20 +247,38 @@ def delete_batch(project_id: str, batch_id: str):
 # ── IMAGES IN BATCH ────────────────────────────────────────────────────
 
 @router.get("/{project_id}/batches/{batch_id}/images")
-def list_batch_images(project_id: str, batch_id: str):
+def list_batch_images(project_id: str, batch_id: str, page: int = 1, limit: int = 10, search: str = ""):
     batch_dir = os.path.join(get_batches_dir(project_id), batch_id)
     if not os.path.exists(batch_dir):
         raise HTTPException(status_code=404, detail="Batch not found")
 
     images_dir = os.path.join(batch_dir, "images")
     annotations_dir = os.path.join(batch_dir, "annotations")
-    files = []
     if not os.path.exists(images_dir):
-        return []
+        return {"images": [], "total": 0, "page": page, "limit": limit}
 
-    for name in sorted(os.listdir(images_dir)):
+    all_files = sorted(os.listdir(images_dir))
+    matching_files = []
+    search_lower = search.lower().strip() if search else ""
+    for name in all_files:
         if not name.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
             continue
+        if search_lower and search_lower not in name.lower():
+            continue
+        matching_files.append(name)
+
+    total = len(matching_files)
+
+    # Allow disabling limit with -1 or 0
+    if limit > 0:
+        start = (page - 1) * limit
+        end = start + limit
+        sliced_files = matching_files[start:end]
+    else:
+        sliced_files = matching_files
+
+    files = []
+    for name in sliced_files:
         ann_path = os.path.join(annotations_dir, f"{name}.json")
         has_ann = False
         classes = []
@@ -279,7 +297,7 @@ def list_batch_images(project_id: str, batch_id: str):
             "annotated": has_ann,
             "classes": classes,
         })
-    return files
+    return {"images": files, "total": total, "page": page, "limit": limit}
 
 
 @router.post("/{project_id}/batches/{batch_id}/upload")
