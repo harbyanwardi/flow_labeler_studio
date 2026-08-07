@@ -978,7 +978,7 @@ async function fetchBatchImages(targetIndexAfterLoad = null) {
     state.currentImageIndex = -1;
     imgObj = null;
     state.annotations = [];
-    redraw();
+    if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
     const counter = document.getElementById("imgCounter");
     if (counter) counter.textContent = "0 / 0";
   }
