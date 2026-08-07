@@ -119,7 +119,7 @@ def import_coco_dataset(project_id: str, file: UploadFile, batch_name: str = For
     with tempfile.TemporaryDirectory() as tmp_dir:
         zip_path = os.path.join(tmp_dir, "upload.zip")
         with open(zip_path, "wb") as f:
-            f.write(file.file.read())
+            shutil.copyfileobj(file.file, f)
             
         try:
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
