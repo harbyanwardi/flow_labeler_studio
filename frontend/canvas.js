@@ -38,6 +38,27 @@ let addToDsCtx = { selectedDatasetId: null, selectedVersionId: null };
 // ════════════════════════════════════════════════════════════════════
 // INIT
 // ════════════════════════════════════════════════════════════════════
+function loadProjectClasses() {
+  if (!state.projectId) return;
+  const savedClasses = localStorage.getItem("apiflow_classes_" + state.projectId);
+  const savedColors = localStorage.getItem("apiflow_colors_" + state.projectId);
+  if (savedClasses) {
+    state.classes = JSON.parse(savedClasses);
+  } else {
+    state.classes = ["defect", "crack", "scratch", "burn"];
+  }
+  if (savedColors) {
+    state.classColors = JSON.parse(savedColors);
+  } else {
+    state.classColors = {
+      defect:  "#ef4444",
+      crack:   "#3b82f6",
+      scratch: "#10b981",
+      burn:    "#f59e0b",
+    };
+  }
+}
+
 window.addEventListener("load", () => {
   const savedId = localStorage.getItem("apiflow_project_id");
   const savedName = localStorage.getItem("apiflow_project_name");
@@ -45,6 +66,7 @@ window.addEventListener("load", () => {
   if (savedId && savedName) {
     state.projectId = savedId;
     state.projectName = savedName;
+    loadProjectClasses();
     showScreen("home");
     fetchHome();
   } else {
@@ -321,6 +343,7 @@ function selectProject(id, name) {
   state.projectName = name;
   localStorage.setItem("apiflow_project_id", id);
   localStorage.setItem("apiflow_project_name", name);
+  loadProjectClasses();
   showScreen("home");
   fetchHome();
 }
@@ -941,6 +964,15 @@ async function fetchBatchImages(targetIndexAfterLoad = null) {
     const data = await r.json();
     state.images = data.images || [];
     state.totalImages = data.total || 0;
+    
+    // Register any classes loaded from the image summaries
+    state.images.forEach(img => {
+      (img.classes || []).forEach(c => {
+        if (!state.classes.includes(c)) {
+          addClass(c);
+        }
+      });
+    });
   } catch (e) {
     console.error(e);
     state.images = [];
@@ -1081,6 +1113,13 @@ async function loadImage(idx) {
     const d = await r.json();
     state.annotations = d.annotations || [];
     state.nullLabeled = d.null_labeled || false;
+    
+    // Register any loaded annotation classes
+    state.annotations.forEach(ann => {
+      if (ann.label && !state.classes.includes(ann.label)) {
+        addClass(ann.label);
+      }
+    });
   } catch { 
     state.annotations = []; 
     state.nullLabeled = false;

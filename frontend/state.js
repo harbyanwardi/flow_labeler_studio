@@ -72,6 +72,10 @@ function addClass(className) {
   if (cleaned && !state.classes.includes(cleaned)) {
     state.classes.push(cleaned);
     state.classColors[cleaned] = getRandomColor();
+    if (state.projectId) {
+      localStorage.setItem("apiflow_classes_" + state.projectId, JSON.stringify(state.classes));
+      localStorage.setItem("apiflow_colors_" + state.projectId, JSON.stringify(state.classColors));
+    }
     return cleaned;
   }
   return null;
