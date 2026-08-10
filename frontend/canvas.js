@@ -1451,6 +1451,7 @@ canvas.addEventListener("click", e => {
     let found = -1;
     for (let i = state.annotations.length - 1; i >= 0; i--) {
       const a = state.annotations[i];
+      if (a._labelRect && ptInBBox(p, a._labelRect)) { found = i; break; }
       if (a.type === "bbox" && ptInBBox(p, a.bbox)) { found = i; break; }
       if (a.type === "polygon" && ptInPoly(p, a.mask)) { found = i; break; }
     }
@@ -1524,7 +1525,7 @@ function drawAnnotation(ann, sel) {
   const col = state.classColors[ann.label] || "#3b82f6";
   const s = view.scale || 1;
   ctx.strokeStyle = col;
-  ctx.lineWidth = (sel ? 4.5 : 2.5) / s;
+  ctx.lineWidth = (sel ? 6.0 : 3.5) / s;
   ctx.setLineDash([]);
 
   if (ann.type === "bbox" && ann.bbox) {
@@ -1536,12 +1537,18 @@ function drawAnnotation(ann, sel) {
     // background rect for label text
     const rectHeight = 18 / s;
     const paddingX = 8 / s;
+    const lx = ann.bbox[0];
+    const ly = ann.bbox[1] - rectHeight;
+    const lw = tw + paddingX;
+    
     ctx.fillStyle = col;
-    ctx.fillRect(ann.bbox[0], ann.bbox[1] - rectHeight, tw + paddingX, rectHeight);
+    ctx.fillRect(lx, ly, lw, rectHeight);
     
     // draw text
     ctx.fillStyle = "#fff";
-    ctx.fillText(tag, ann.bbox[0] + 4 / s, ann.bbox[1] - 5 / s);
+    ctx.fillText(tag, lx + 4 / s, ann.bbox[1] - 5 / s);
+    
+    ann._labelRect = [lx, ly, lw, rectHeight];
   }
   if (ann.type === "polygon" && ann.mask && ann.mask.length > 1) {
     ctx.beginPath();
@@ -1557,11 +1564,15 @@ function drawAnnotation(ann, sel) {
     const tw = ctx.measureText(ann.label).width;
     const rectHeight = 16 / s;
     const rectWidth = tw + 8 / s;
+    const lx = cx - rectWidth / 2;
+    const ly = cy - rectHeight / 2;
     ctx.fillStyle = col;
-    ctx.fillRect(cx - rectWidth / 2, cy - rectHeight / 2, rectWidth, rectHeight);
+    ctx.fillRect(lx, ly, rectWidth, rectHeight);
     
     ctx.fillStyle = "#fff";
     ctx.fillText(ann.label, cx - tw / 2, cy + 4 / s);
+    
+    ann._labelRect = [lx, ly, rectWidth, rectHeight];
     if (sel) ann.mask.forEach(p => {
       ctx.fillStyle = "#fff"; ctx.strokeStyle = col; ctx.lineWidth = 1.5 / s;
       ctx.beginPath(); ctx.arc(p.x, p.y, 4.5 / s, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
