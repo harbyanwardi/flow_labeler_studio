@@ -1433,6 +1433,19 @@ canvas.addEventListener("mouseup", e => {
 canvas.addEventListener("click", e => {
   if (e.button !== 0 || isSpaceDown || state.mode === "pan") return;
   const p = getImgPos(e);
+  
+  if (state.selected !== null && state.selected >= 0 && state.selected < state.annotations.length) {
+    const selAnn = state.annotations[state.selected];
+    if (selAnn && selAnn._delBtn) {
+      const dx = p.x - selAnn._delBtn.x;
+      const dy = p.y - selAnn._delBtn.y;
+      if (Math.sqrt(dx*dx + dy*dy) <= selAnn._delBtn.r + (5 / view.scale)) {
+        deleteSelected();
+        return;
+      }
+    }
+  }
+
   if (state.mode === "polygon") { state.tempPoints.push(p); draw(); return; }
   if (state.mode === "bbox" && !state.isDrawing) {
     let found = -1;
@@ -1553,6 +1566,44 @@ function drawAnnotation(ann, sel) {
       ctx.fillStyle = "#fff"; ctx.strokeStyle = col; ctx.lineWidth = 1.5 / s;
       ctx.beginPath(); ctx.arc(p.x, p.y, 4.5 / s, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
     });
+  }
+
+  // Draw Delete Button when selected
+  if (sel) {
+    const delRadius = 10 / s;
+    let delX, delY;
+    if (ann.type === "bbox" && ann.bbox) {
+      delX = ann.bbox[0] + ann.bbox[2];
+      delY = ann.bbox[1];
+    } else if (ann.type === "polygon" && ann.mask && ann.mask.length > 0) {
+      let maxX = -Infinity, minY = Infinity;
+      ann.mask.forEach(p => {
+        if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y;
+      });
+      delX = maxX; delY = minY;
+    }
+    if (delX !== undefined && delY !== undefined) {
+      ctx.fillStyle = "#ef4444";
+      ctx.beginPath();
+      ctx.arc(delX, delY, delRadius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = 1.5 / s;
+      ctx.stroke();
+      
+      ctx.fillStyle = "#fff";
+      ctx.font = `bold ${12 / s}px Inter,sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("✕", delX, delY + 1 / s);
+      ctx.textAlign = "start";
+      ctx.textBaseline = "alphabetic";
+      
+      ann._delBtn = {x: delX, y: delY, r: delRadius};
+    }
+  } else {
+    ann._delBtn = null;
   }
 }
 

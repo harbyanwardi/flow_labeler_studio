@@ -169,7 +169,7 @@
         <aside class="sidebar sidebar-right">
           <div class="sidebar-section">
             <span class="sidebar-section-title" style="display:block;margin-bottom:9px;">Classes</span>
-            <div id="classListEl"></div>
+            <div id="classListEl" style="max-height: 200px; overflow-y: auto; padding-right: 4px; margin-bottom: 8px;"></div>
             <div class="add-cls-form">
               <input type="text" id="newClassInput" class="add-cls-input" placeholder="New class…">
               <button class="btn btn-sm btn-primary" onclick="handleAddClass()">Add</button>
@@ -493,7 +493,7 @@
 
   <!-- SCRIPTS -->
   <script src="static/state.js"></script>
-  <script src="static/canvas.js"></script>
+  <script src="static/canvas.js?v=2"></script>
 </body>
 
 </html>
