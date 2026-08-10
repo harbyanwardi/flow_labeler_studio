@@ -247,7 +247,7 @@ def delete_batch(project_id: str, batch_id: str):
 # ── IMAGES IN BATCH ────────────────────────────────────────────────────
 
 @router.get("/{project_id}/batches/{batch_id}/images")
-def list_batch_images(project_id: str, batch_id: str, page: int = 1, limit: int = 10, search: str = ""):
+def list_batch_images(project_id: str, batch_id: str, page: int = 1, limit: int = 10, search: str = "", status: str = "all"):
     batch_dir = os.path.join(get_batches_dir(project_id), batch_id)
     if not os.path.exists(batch_dir):
         raise HTTPException(status_code=404, detail="Batch not found")
@@ -265,6 +265,22 @@ def list_batch_images(project_id: str, batch_id: str, page: int = 1, limit: int 
             continue
         if search_lower and search_lower not in name.lower():
             continue
+            
+        if status != "all":
+            ann_path = os.path.join(annotations_dir, f"{name}.json")
+            has_ann = False
+            if os.path.exists(ann_path):
+                try:
+                    with open(ann_path, "r", encoding="utf-8") as f:
+                        d = json.load(f)
+                        has_ann = len(d.get("annotations", [])) > 0 or d.get("null_labeled", False)
+                except Exception:
+                    pass
+            if status == "labeled" and not has_ann:
+                continue
+            if status == "unlabeled" and has_ann:
+                continue
+                
         matching_files.append(name)
 
     total = len(matching_files)

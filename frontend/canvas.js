@@ -958,9 +958,11 @@ async function fetchBatchImages(targetIndexAfterLoad = null) {
   
   const searchEl = document.getElementById("imgSearch");
   const query = searchEl ? searchEl.value.trim() : "";
+  const filterEl = document.getElementById("imgStatusFilter");
+  const filterStatus = filterEl ? filterEl.value : "all";
   
   try {
-    const r = await fetch(`${API}/batches/${state.projectId}/batches/${state.activeBatchId}/images?page=${state.currentPage}&limit=${state.limit}&search=${encodeURIComponent(query)}`);
+    const r = await fetch(`${API}/batches/${state.projectId}/batches/${state.activeBatchId}/images?page=${state.currentPage}&limit=${state.limit}&search=${encodeURIComponent(query)}&status=${filterStatus}`);
     const data = await r.json();
     state.images = data.images || [];
     state.totalImages = data.total || 0;
