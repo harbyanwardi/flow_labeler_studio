@@ -905,7 +905,7 @@ async function doExport() {
   if (btn) { btn.disabled = true; btn.innerHTML = `<span class="spinner"></span> Generating…`; }
 
   try {
-    const res = await fetch(`${API}/export/download`, {
+    const res = await fetch(`${API}/export/start`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         project_id: state.projectId,
@@ -919,18 +919,31 @@ async function doExport() {
       const err = await res.json().catch(() => ({ detail: "Unknown error" }));
       throw new Error(err.detail);
     }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `apiflow_export.zip`;
-    a.click(); URL.revokeObjectURL(url);
-
-    closeModal("exportModal");
-
-    // refresh version view if we're on it
-    if (state.view === "version") refreshVersionView();
-    else fetchHome();
+    const data = await res.json();
+    const taskId = data.task_id;
+    
+    // Polling loop
+    while (true) {
+      await new Promise(r => setTimeout(r, 2000));
+      const statusRes = await fetch(`${API}/export/status/${taskId}`);
+      if (!statusRes.ok) throw new Error("Failed to get task status");
+      const statusData = await statusRes.json();
+      
+      if (statusData.status === "done") {
+        const a = document.createElement("a");
+        a.href = `${API}${statusData.download_url}`;
+        a.download = `apiflow_export.zip`;
+        a.click();
+        
+        closeModal("exportModal");
+        if (state.view === "version") refreshVersionView();
+        else fetchHome();
+        break;
+      } else if (statusData.status === "error") {
+        throw new Error(statusData.error || "Unknown background error");
+      }
+      // if processing/pending, continue polling
+    }
   } catch (e) {
     alert(`Export failed: ${e.message}`);
   } finally {

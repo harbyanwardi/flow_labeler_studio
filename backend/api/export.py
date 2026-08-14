@@ -1,7 +1,7 @@
 # backend/api/export.py
 # Export a dataset VERSION with train/val/test split → ZIP download + log entry
 import os, json, zipfile, shutil, tempfile, random, math, datetime, uuid
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from pathlib import Path
@@ -33,6 +33,21 @@ def _wj(p, d):
     os.makedirs(os.path.dirname(p), exist_ok=True)
     with open(p, "w", encoding="utf-8") as f:
         json.dump(d, f, indent=2, ensure_ascii=False)
+
+
+def _set_task_status(task_id, status, download_url=None, error=None):
+    tasks_dir = os.path.join(EXPORTS_DIR, "tasks")
+    os.makedirs(tasks_dir, exist_ok=True)
+    _wj(os.path.join(tasks_dir, f"{task_id}.json"), {
+        "status": status,
+        "download_url": download_url,
+        "error": error
+    })
+
+def _get_task_status(task_id):
+    p = os.path.join(EXPORTS_DIR, "tasks", f"{task_id}.json")
+    if os.path.exists(p): return _rj(p)
+    return {"status": "not_found"}
 
 
 def _gather_from_version(project_id: str, dataset_id: str, version_id: str):
@@ -210,66 +225,92 @@ def _write_coco(export_path: Path, splits: dict, classes_list: list, c2id: dict)
             json.dump(coco, f, indent=2)
 
 
+# ── background worker ──────────────────────────────────────────────────
+
+def _process_export(task_id: str, req: ExportRequest):
+    try:
+        _set_task_status(task_id, "processing")
+        
+        files, unique_classes = _gather_from_version(req.project_id, req.dataset_id, req.version_id)
+        if not files:
+            raise Exception("No annotated images found in this dataset version. Add images first.")
+
+        classes_list = sorted(unique_classes) or ["object"]
+
+        if req.format == "coco":
+            c2id = {n: i+1 for i, n in enumerate(classes_list)}
+        else:
+            c2id = {n: i for i, n in enumerate(classes_list)}
+
+        splits = _split(files, req.train_pct, req.val_pct, req.test_pct)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            export_path = Path(tmp) / "dataset"
+            export_path.mkdir()
+
+            if req.format.startswith("yolov11"):
+                _write_yolo(export_path, splits, classes_list, c2id, req.format)
+            elif req.format == "coco":
+                _write_coco(export_path, splits, classes_list, c2id)
+
+            zip_name = f"export_{req.dataset_id}_{req.version_id}_{req.format}_{task_id}.zip"
+            zip_path = os.path.join(EXPORTS_DIR, zip_name)
+            os.makedirs(EXPORTS_DIR, exist_ok=True)
+
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                for root, _, flist in os.walk(export_path):
+                    for fn in flist:
+                        full = os.path.join(root, fn)
+                        zf.write(full, arcname=os.path.relpath(full, export_path))
+
+        # ── write export log into version meta ──────────────────────────────
+        export_entry = {
+            "id":          uuid.uuid4().hex[:8],
+            "exported_at": datetime.datetime.now().isoformat(),
+            "format":      req.format,
+            "train_pct":   req.train_pct,
+            "val_pct":     req.val_pct,
+            "test_pct":    req.test_pct,
+            "image_count": len(files),
+            "train_count": len(splits["train"]),
+            "valid_count": len(splits["valid"]),
+            "test_count":  len(splits["test"]),
+            "zip_name":    zip_name,
+        }
+        mp = os.path.join(PROJECTS_DIR, req.project_id, "datasets", req.dataset_id, "versions", req.version_id, "meta.json")
+        if os.path.exists(mp):
+            m = _rj(mp)
+            m.setdefault("exports", []).append(export_entry)
+            m["status"] = "exported"
+            _wj(mp, m)
+            
+        _set_task_status(task_id, "done", download_url=f"/export/download-file/{zip_name}")
+
+    except Exception as e:
+        _set_task_status(task_id, "error", error=str(e))
+
 # ── endpoint ───────────────────────────────────────────────────────────
 
-@router.post("/download")
-def export_version(req: ExportRequest):
+@router.post("/start")
+def start_export(req: ExportRequest, background_tasks: BackgroundTasks):
     total_pct = req.train_pct + req.val_pct + req.test_pct
     if total_pct <= 0:
         raise HTTPException(status_code=400, detail="Split percentages must sum > 0.")
 
-    files, unique_classes = _gather_from_version(req.project_id, req.dataset_id, req.version_id)
-    if not files:
-        raise HTTPException(status_code=400,
-            detail="No annotated images found in this dataset version. Add images first.")
+    task_id = uuid.uuid4().hex[:12]
+    _set_task_status(task_id, "pending")
+    background_tasks.add_task(_process_export, task_id, req)
+    return {"task_id": task_id}
 
-    classes_list = sorted(unique_classes) or ["object"]
 
-    # COCO uses 1-indexed categories; YOLO uses 0-indexed
-    if req.format == "coco":
-        c2id = {n: i+1 for i, n in enumerate(classes_list)}
-    else:
-        c2id = {n: i for i, n in enumerate(classes_list)}
+@router.get("/status/{task_id}")
+def get_export_status(task_id: str):
+    return _get_task_status(task_id)
 
-    splits = _split(files, req.train_pct, req.val_pct, req.test_pct)
 
-    with tempfile.TemporaryDirectory() as tmp:
-        export_path = Path(tmp) / "dataset"
-        export_path.mkdir()
-
-        if req.format.startswith("yolov11"):
-            _write_yolo(export_path, splits, classes_list, c2id, req.format)
-        elif req.format == "coco":
-            _write_coco(export_path, splits, classes_list, c2id)
-
-        zip_name = f"export_{req.dataset_id}_{req.version_id}_{req.format}.zip"
-        zip_path = os.path.join(EXPORTS_DIR, zip_name)
-
-        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-            for root, _, flist in os.walk(export_path):
-                for fn in flist:
-                    full = os.path.join(root, fn)
-                    zf.write(full, arcname=os.path.relpath(full, export_path))
-
-    # ── write export log into version meta ──────────────────────────────
-    export_entry = {
-        "id":          uuid.uuid4().hex[:8],
-        "exported_at": datetime.datetime.now().isoformat(),
-        "format":      req.format,
-        "train_pct":   req.train_pct,
-        "val_pct":     req.val_pct,
-        "test_pct":    req.test_pct,
-        "image_count": len(files),
-        "train_count": len(splits["train"]),
-        "valid_count": len(splits["valid"]),
-        "test_count":  len(splits["test"]),
-        "zip_name":    zip_name,
-    }
-    mp = os.path.join(PROJECTS_DIR, req.project_id, "datasets", req.dataset_id, "versions", req.version_id, "meta.json")
-    if os.path.exists(mp):
-        m = _rj(mp)
-        m.setdefault("exports", []).append(export_entry)
-        m["status"] = "exported"
-        _wj(mp, m)
-
-    return FileResponse(zip_path, media_type="application/zip", filename=zip_name)
+@router.get("/download-file/{filename}")
+def download_export_file(filename: str):
+    zip_path = os.path.join(EXPORTS_DIR, filename)
+    if not os.path.exists(zip_path):
+        raise HTTPException(status_code=404, detail="Export file not found")
+    return FileResponse(zip_path, media_type="application/zip", filename=filename)
