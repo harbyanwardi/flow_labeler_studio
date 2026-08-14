@@ -160,6 +160,7 @@ function renderTopbar() {
       <span class="topbar-crumb-sep">›</span>
       <span class="topbar-crumb topbar-crumb-active">${escHtml(batch.name || "Batch")}</span>`;
     acts.innerHTML = `
+      <button class="btn btn-outline" onclick="markUnlabeledAsNull()">✓ Mark Unlabeled as Null</button>
       <button class="btn btn-success" id="autoLabelBtn" onclick="triggerAutoLabel()">✦ AI Auto Label</button>
       <button class="btn btn-primary" onclick="openAddToDatasetModal()">+ Add to Dataset</button>`;
     return;
@@ -947,6 +948,13 @@ async function changePage(dir) {
 
 async function fetchBatchImages(targetIndexAfterLoad = null) {
   if (!state.activeBatchId) return;
+
+  // Save current annotations before the image list changes
+  if (state.currentImageIndex !== -1) {
+    await saveAnnotations(false);
+    state.currentImageIndex = -1;
+  }
+
   const el = document.getElementById("imageListContainer");
   if (el) {
     el.innerHTML = `
@@ -1104,6 +1112,15 @@ async function loadImage(idx) {
 
   state.currentImageIndex = idx;
   const img = state.images[idx];
+  
+  // Clear previous canvas state to prevent cross-contamination during loading
+  state.annotations = [];
+  imgObj = null;
+  state.nullLabeled = false;
+  state.tempPoints = []; 
+  state.selected = null;
+  if (typeof ctx !== "undefined" && ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+
   renderImageList();
   const counter = document.getElementById("imgCounter");
   const dimInfo = document.getElementById("imgDimInfo");
@@ -1126,7 +1143,6 @@ async function loadImage(idx) {
     state.annotations = []; 
     state.nullLabeled = false;
   }
-  state.tempPoints = []; state.selected = null;
 
   updateNullLabelButton();
 
@@ -1235,6 +1251,37 @@ async function navNext() {
     }
   } else {
     loadImage(i);
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// BULK ACTIONS
+// ════════════════════════════════════════════════════════════════════
+async function markUnlabeledAsNull() {
+  if (!state.activeBatchId) return;
+  if (!confirm("This will mark all currently unlabeled images in this batch as Null Labeled (No defects). Proceed?")) return;
+  
+  if (state.currentImageIndex !== -1) {
+    await saveAnnotations(false);
+  }
+  
+  const btn = document.querySelector("button[onclick='markUnlabeledAsNull()']");
+  if (btn) { btn.disabled = true; btn.innerHTML = `<span class="spinner"></span> Processing…`; }
+  
+  try {
+    const r = await fetch(`${API}/batches/${state.projectId}/batches/${state.activeBatchId}/mark-unlabeled-null`, {
+      method: "POST"
+    });
+    if (!r.ok) throw new Error("Backend failed");
+    const result = await r.json();
+    alert(`✅ Successfully marked ${result.marked_count} images as null labeled.`);
+    
+    state.currentImageIndex = -1; 
+    await fetchBatchImages(0);
+  } catch (e) {
+    alert("Failed to mark images: " + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = "✓ Mark Unlabeled as Null"; }
   }
 }
 

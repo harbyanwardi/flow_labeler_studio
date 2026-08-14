@@ -377,3 +377,42 @@ def save_batch_annotation(project_id: str, batch_id: str, data: dict):
     with open(os.path.join(annotations_dir, f"{image_name}.json"), "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
     return {"status": "success"}
+
+
+@router.post("/{project_id}/batches/{batch_id}/mark-unlabeled-null")
+def mark_unlabeled_as_null(project_id: str, batch_id: str):
+    batch_dir = os.path.join(get_batches_dir(project_id), batch_id)
+    if not os.path.exists(batch_dir):
+        raise HTTPException(status_code=404, detail="Batch not found")
+
+    images_dir = os.path.join(batch_dir, "images")
+    annotations_dir = os.path.join(batch_dir, "annotations")
+    os.makedirs(annotations_dir, exist_ok=True)
+    
+    if not os.path.exists(images_dir):
+        return {"marked_count": 0}
+
+    marked_count = 0
+    for name in os.listdir(images_dir):
+        if not name.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
+            continue
+            
+        ann_path = os.path.join(annotations_dir, f"{name}.json")
+        has_ann = False
+        data = {"image": name, "annotations": [], "null_labeled": False}
+        if os.path.exists(ann_path):
+            try:
+                with open(ann_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    anns = data.get("annotations", [])
+                    has_ann = len(anns) > 0 or data.get("null_labeled", False)
+            except Exception:
+                pass
+                
+        if not has_ann:
+            data["null_labeled"] = True
+            with open(ann_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+            marked_count += 1
+
+    return {"status": "success", "marked_count": marked_count}
