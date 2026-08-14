@@ -403,13 +403,17 @@ def mark_unlabeled_as_null(project_id: str, batch_id: str):
         if os.path.exists(ann_path):
             try:
                 with open(ann_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    anns = data.get("annotations", [])
-                    has_ann = len(anns) > 0 or data.get("null_labeled", False)
+                    loaded_data = json.load(f)
+                    if isinstance(loaded_data, dict):
+                        data = loaded_data
+                        anns = data.get("annotations", [])
+                        has_ann = len(anns) > 0 or data.get("null_labeled", False)
             except Exception:
                 pass
                 
         if not has_ann:
+            if not isinstance(data, dict):
+                data = {"image": name, "annotations": [], "null_labeled": False}
             data["null_labeled"] = True
             with open(ann_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)

@@ -1272,7 +1272,10 @@ async function markUnlabeledAsNull() {
     const r = await fetch(`${API}/batches/${state.projectId}/batches/${state.activeBatchId}/mark-unlabeled-null`, {
       method: "POST"
     });
-    if (!r.ok) throw new Error("Backend failed");
+    if (!r.ok) {
+      const errText = await r.text();
+      throw new Error(`Backend failed (${r.status}): ${errText}`);
+    }
     const result = await r.json();
     alert(`✅ Successfully marked ${result.marked_count} images as null labeled.`);
     
