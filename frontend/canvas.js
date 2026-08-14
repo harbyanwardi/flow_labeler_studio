@@ -782,11 +782,18 @@ function renderAddImgList() {
 }
 
 function updateAddImgSummary() {
-  const checked = document.querySelectorAll(".add-img-checkbox:checked").length;
+  const selectAll = document.getElementById("selectAllAddImages");
   const el = document.getElementById("addImgSummary");
   if (!el) return;
+
+  if (selectAll && selectAll.checked) {
+    el.innerHTML = `<span style="color:var(--accent);font-weight:600;">ALL labeled images in this entire batch</span> will be added.`;
+    return;
+  }
+
+  const checked = document.querySelectorAll(".add-img-checkbox:checked").length;
   el.textContent = checked > 0
-    ? `${checked} image${checked !== 1 ? "s" : ""} will be added to the selected version.`
+    ? `${checked} image${checked !== 1 ? "s" : ""} from this page will be added.`
     : "No images selected.";
 }
 
@@ -800,8 +807,16 @@ async function confirmAddToDataset() {
   if (!selectedDatasetId || !selectedVersionId) {
     alert("Please select a dataset version."); return;
   }
-  const checked = Array.from(document.querySelectorAll(".add-img-checkbox:checked")).map(cb => cb.value);
-  if (!checked.length) { alert("Select at least one image."); return; }
+  
+  const selectAll = document.getElementById("selectAllAddImages");
+  let checked = [];
+  if (selectAll && selectAll.checked) {
+    // Send empty array to tell backend to add ALL labeled images in the batch
+    checked = [];
+  } else {
+    checked = Array.from(document.querySelectorAll(".add-img-checkbox:checked")).map(cb => cb.value);
+    if (!checked.length) { alert("Select at least one image."); return; }
+  }
 
   const augChecked = Array.from(document.querySelectorAll(".aug-checkbox:checked")).map(cb => cb.value);
 
