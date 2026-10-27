@@ -1760,22 +1760,56 @@ async function doImportDataset() {
 
   const file = fileInput.files[0];
   const btn = document.getElementById("confirmImportDatasetBtn");
-  if (btn) { btn.disabled = true; btn.innerHTML = `<span class="spinner"></span> Importing…`; }
+  if (btn) { btn.disabled = true; btn.innerHTML = `<span class="spinner"></span> Preparing…`; }
 
   const fd = new FormData();
   fd.append("file", file);
   fd.append("batch_name", name);
 
   try {
-    const res = await fetch(`${API}/batches/${state.projectId}/batches/import-coco`, {
-      method: "POST",
-      body: fd
+    const result = await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `${API}/batches/${state.projectId}/batches/import-coco`);
+
+      xhr.upload.onprogress = (evt) => {
+        if (evt.lengthComputable && btn) {
+          const pct = Math.round((evt.loaded / evt.total) * 100);
+          const loadedMB = (evt.loaded / (1024 * 1024)).toFixed(1);
+          const totalMB = (evt.total / (1024 * 1024)).toFixed(1);
+          btn.innerHTML = `<span class="spinner"></span> Uploading ${pct}% (${loadedMB}/${totalMB} MB)`;
+        }
+      };
+
+      xhr.upload.onload = () => {
+        if (btn) {
+          btn.innerHTML = `<span class="spinner"></span> Processing on server…`;
+        }
+      };
+
+      xhr.onload = () => {
+        try {
+          const data = JSON.parse(xhr.responseText || "{}");
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve(data);
+          } else {
+            reject(new Error(data.detail || `Server error (${xhr.status})`));
+          }
+        } catch (err) {
+          reject(new Error(xhr.responseText || `Server error (${xhr.status})`));
+        }
+      };
+
+      xhr.onerror = () => {
+        reject(new Error("Network connection failed (ERR_CONNECTION). Check server upload limits or Cloudflare."));
+      };
+
+      xhr.ontimeout = () => {
+        reject(new Error("Upload timed out. Check server timeout settings."));
+      };
+
+      xhr.send(fd);
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: "Import failed" }));
-      throw new Error(err.detail);
-    }
-    const result = await res.json();
+
     closeModal("importDatasetModal");
     alert(`Successfully imported "${result.name}" with ${result.imported_images} annotated images!`);
     await fetchHome();

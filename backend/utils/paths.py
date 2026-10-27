@@ -22,7 +22,8 @@ PROJECTS_DIR = os.path.join(STORAGE_DIR, "projects")
 IMAGES_DIR = os.path.join(STORAGE_DIR, "images")
 ANNOTATIONS_DIR = os.path.join(STORAGE_DIR, "annotations")
 EXPORTS_DIR = os.path.join(APP_DIR, "datasets", "exports")
+LOGS_DIR = os.path.join(APP_DIR, "logs")
 
 # Ensure required persistent storage directories exist
-for directory in [STORAGE_DIR, PROJECTS_DIR, IMAGES_DIR, ANNOTATIONS_DIR, EXPORTS_DIR]:
+for directory in [STORAGE_DIR, PROJECTS_DIR, IMAGES_DIR, ANNOTATIONS_DIR, EXPORTS_DIR, LOGS_DIR]:
     os.makedirs(directory, exist_ok=True)

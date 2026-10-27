@@ -1,10 +1,13 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from backend.api import batches, export, datasets, projects, autolabel
 import os
 from backend.utils.paths import FRONTEND_DIR, STORAGE_DIR
+from backend.utils.logger import setup_logging
+
+logger = setup_logging()
 
 app = FastAPI(title="APIFlow Labeler")
 
@@ -15,6 +18,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled exception on {request.method} {request.url.path}: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Internal Server Error: {str(exc)}"}
+    )
 
 # API Routers
 app.include_router(projects.router,  prefix="/projects")

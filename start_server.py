@@ -23,7 +23,10 @@ os.chdir(PROJECT_DIR)
 if PROJECT_DIR not in sys.path:
     sys.path.insert(0, PROJECT_DIR)
 
-# ── 4. Jalankan aplikasi via uvicorn ────────────────────────────────
+# ── 4. Inisialisasi logging harian & jalankan aplikasi via uvicorn ──
+from backend.utils.logger import setup_logging
+setup_logging()
+
 import uvicorn
 
 uvicorn.run(
@@ -32,4 +35,5 @@ uvicorn.run(
     port=8865,
     workers=1,
     log_level='info',
+    log_config=None,
 )

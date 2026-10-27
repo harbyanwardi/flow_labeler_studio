@@ -117,123 +117,124 @@ def import_coco_dataset(project_id: str, file: UploadFile = File(...), batch_nam
     os.makedirs(images_dir, exist_ok=True)
     os.makedirs(annotations_dir, exist_ok=True)
     
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        zip_path = os.path.join(tmp_dir, "upload.zip")
-        with open(zip_path, "wb") as f:
-            shutil.copyfileobj(file.file, f)
-            
+    try:
+        file.file.seek(0)
         try:
-            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                zip_ref.extractall(tmp_dir)
+            zip_ref = zipfile.ZipFile(file.file, 'r')
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Invalid ZIP file: {str(e)}")
-            
-        coco_files = []
-        for root, dirs, files in os.walk(tmp_dir):
-            for filename in files:
-                if filename.endswith(".json") and not filename.startswith("meta"):
-                    filepath = os.path.join(root, filename)
+
+        with zip_ref:
+            all_entries = zip_ref.namelist()
+            entry_by_exact = {e.replace("\\", "/"): e for e in all_entries if not e.endswith('/')}
+            entry_by_basename = {os.path.basename(e): e for e in all_entries if not e.endswith('/')}
+
+            coco_files = []
+            for member in all_entries:
+                if member.endswith(".json") and not os.path.basename(member).startswith("meta"):
                     try:
-                        with open(filepath, "r", encoding="utf-8") as f:
-                            data = json.load(f)
+                        with zip_ref.open(member) as jf:
+                            data = json.load(jf)
                             if isinstance(data, dict) and "images" in data and "annotations" in data and "categories" in data:
-                                coco_files.append((filepath, data))
+                                coco_files.append((member, data))
                     except Exception:
                         continue
-                        
-        if not coco_files:
-            raise HTTPException(status_code=400, detail="No valid COCO JSON annotation files found in the ZIP.")
-            
-        imported_images_count = 0
-        
-        for coco_path, coco_data in coco_files:
-            coco_dir = os.path.dirname(coco_path)
-            
-            cat_map = {}
-            for cat in coco_data.get("categories", []):
-                cat_map[cat["id"]] = cat["name"]
-                
-            ann_map = {}
-            for ann in coco_data.get("annotations", []):
-                image_id = ann.get("image_id")
-                ann_map.setdefault(image_id, []).append(ann)
-                
-            for img_info in coco_data.get("images", []):
-                img_id = img_info.get("id")
-                file_name = img_info.get("file_name")
-                if not file_name:
-                    continue
-                    
-                src_img_path = os.path.join(coco_dir, file_name)
-                if not os.path.exists(src_img_path):
-                    # Try recursively checking the temp dir
-                    base_name = os.path.basename(file_name)
-                    found = False
-                    for r, d, fs in os.walk(tmp_dir):
-                        if base_name in fs:
-                            src_img_path = os.path.join(r, base_name)
-                            found = True
-                            break
-                    if not found:
+
+            if not coco_files:
+                raise HTTPException(status_code=400, detail="No valid COCO JSON annotation files found in the ZIP.")
+
+            imported_images_count = 0
+
+            for coco_member, coco_data in coco_files:
+                coco_dir = os.path.dirname(coco_member)
+
+                cat_map = {}
+                for cat in coco_data.get("categories", []):
+                    cat_map[cat["id"]] = cat["name"]
+
+                ann_map = {}
+                for ann in coco_data.get("annotations", []):
+                    image_id = ann.get("image_id")
+                    ann_map.setdefault(image_id, []).append(ann)
+
+                for img_info in coco_data.get("images", []):
+                    img_id = img_info.get("id")
+                    file_name = img_info.get("file_name")
+                    if not file_name:
                         continue
-                        
-                safe_name = os.path.basename(src_img_path).replace(" ", "_")
-                dest_name = f"{uuid.uuid4().hex[:8]}_{safe_name}"
-                dest_path = os.path.join(images_dir, dest_name)
-                
-                shutil.copy(src_img_path, dest_path)
-                
-                anns_list = []
-                img_anns = ann_map.get(img_id, [])
-                for ann in img_anns:
-                    cat_id = ann.get("category_id")
-                    label = cat_map.get(cat_id, "default")
-                    
-                    bbox = ann.get("bbox")
-                    seg = ann.get("segmentation")
-                    
-                    ann_type = "bbox"
-                    mask_pts = []
-                    
-                    if seg and isinstance(seg, list) and len(seg) > 0:
-                        poly = seg[0]
-                        if isinstance(poly, list) and len(poly) >= 6:
-                            ann_type = "polygon"
-                            for i in range(0, len(poly), 2):
-                                mask_pts.append({"x": float(poly[i]), "y": float(poly[i+1])})
-                                
-                    ann_item = {
-                        "type": ann_type,
-                        "label": label,
-                        "confidence": 1.0,
-                        "source": "manual"
+
+                    cand_rel = os.path.normpath(os.path.join(coco_dir, file_name)).replace("\\", "/")
+                    cand_exact = file_name.replace("\\", "/")
+                    cand_base = os.path.basename(file_name)
+
+                    zip_member = entry_by_exact.get(cand_rel) or entry_by_exact.get(cand_exact) or entry_by_basename.get(cand_base)
+                    if not zip_member:
+                        continue
+
+                    safe_name = os.path.basename(zip_member).replace(" ", "_")
+                    dest_name = f"{uuid.uuid4().hex[:8]}_{safe_name}"
+                    dest_path = os.path.join(images_dir, dest_name)
+
+                    # Direct stream extract without copying to /tmp
+                    with zip_ref.open(zip_member) as src, open(dest_path, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+
+                    anns_list = []
+                    img_anns = ann_map.get(img_id, [])
+                    for ann in img_anns:
+                        cat_id = ann.get("category_id")
+                        label = cat_map.get(cat_id, "default")
+
+                        bbox = ann.get("bbox")
+                        seg = ann.get("segmentation")
+
+                        ann_type = "bbox"
+                        mask_pts = []
+
+                        if seg and isinstance(seg, list) and len(seg) > 0:
+                            poly = seg[0]
+                            if isinstance(poly, list) and len(poly) >= 6:
+                                ann_type = "polygon"
+                                for i in range(0, len(poly), 2):
+                                    mask_pts.append({"x": float(poly[i]), "y": float(poly[i+1])})
+
+                        ann_item = {
+                            "type": ann_type,
+                            "label": label,
+                            "confidence": 1.0,
+                            "source": "manual"
+                        }
+                        if bbox:
+                            ann_item["bbox"] = [float(c) for c in bbox]
+                        if mask_pts:
+                            ann_item["mask"] = mask_pts
+
+                        anns_list.append(ann_item)
+
+                    ann_payload = {
+                        "image": dest_name,
+                        "annotations": anns_list
                     }
-                    if bbox:
-                        ann_item["bbox"] = [float(c) for c in bbox]
-                    if mask_pts:
-                        ann_item["mask"] = mask_pts
-                        
-                    anns_list.append(ann_item)
-                    
-                ann_payload = {
-                    "image": dest_name,
-                    "annotations": anns_list
-                }
-                with open(os.path.join(annotations_dir, f"{dest_name}.json"), "w", encoding="utf-8") as f:
-                    json.dump(ann_payload, f, indent=2)
-                    
-                imported_images_count += 1
-                
-        if imported_images_count == 0:
-            raise HTTPException(status_code=400, detail="No images matching the annotations were found in the ZIP.")
-            
-        save_batch_meta(project_id, batch_id, meta)
-        return {
-            "status": "success",
-            "batch_id": batch_id,
-            "name": batch_name,
-            "imported_images": imported_images_count
-        }
+                    with open(os.path.join(annotations_dir, f"{dest_name}.json"), "w", encoding="utf-8") as f:
+                        json.dump(ann_payload, f, indent=2)
+
+                    imported_images_count += 1
+
+            if imported_images_count == 0:
+                raise HTTPException(status_code=400, detail="No images matching the annotations were found in the ZIP.")
+
+            save_batch_meta(project_id, batch_id, meta)
+            return {
+                "status": "success",
+                "batch_id": batch_id,
+                "name": batch_name,
+                "imported_images": imported_images_count
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Import failed: {str(e)}")
 
 
 @router.delete("/{project_id}/batches/{batch_id}")
