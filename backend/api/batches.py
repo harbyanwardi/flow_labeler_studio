@@ -5,7 +5,8 @@ import uuid
 import shutil
 import zipfile
 import tempfile
-from fastapi import APIRouter, UploadFile, HTTPException, Form
+from fastapi import APIRouter, UploadFile, HTTPException, Form, File
+import traceback
 from typing import List
 from backend.utils.file import save_upload
 
@@ -99,7 +100,7 @@ def create_batch(project_id: str, body: dict):
 
 
 @router.post("/{project_id}/batches/import-coco")
-def import_coco_dataset(project_id: str, file: UploadFile, batch_name: str = Form(...)):
+def import_coco_dataset(project_id: str, file: UploadFile = File(...), batch_name: str = Form(...)):
     batch_id = str(uuid.uuid4())[:8]
     import datetime
     meta = {
