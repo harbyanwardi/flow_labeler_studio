@@ -21,6 +21,8 @@ class ExportRequest(BaseModel):
     train_pct:   float = 70.0
     val_pct:     float = 20.0
     test_pct:    float = 10.0
+    tags:        List[str] = []
+    tag_mode:    str   = "any"              # any | all
 
 
 # ── helpers ────────────────────────────────────────────────────────────
@@ -50,7 +52,7 @@ def _get_task_status(task_id):
     return {"status": "not_found"}
 
 
-def _gather_from_version(project_id: str, dataset_id: str, version_id: str):
+def _gather_from_version(project_id: str, dataset_id: str, version_id: str, filter_tags: List[str] = None, tag_mode: str = "any"):
     """Read image references from a dataset version; return (files, unique_classes)."""
     datasets_dir = os.path.join(PROJECTS_DIR, project_id, "datasets")
     batches_dir  = os.path.join(PROJECTS_DIR, project_id, "batches")
@@ -61,6 +63,8 @@ def _gather_from_version(project_id: str, dataset_id: str, version_id: str):
     refs   = _rj(imgf)
     files  = []
     clses  = set()
+
+    normalized_tags = set(str(t).strip().lower() for t in (filter_tags or []) if str(t).strip())
 
     for ref in refs:
         bid  = ref["batch_id"]
@@ -75,16 +79,28 @@ def _gather_from_version(project_id: str, dataset_id: str, version_id: str):
             anns = d.get("annotations", [])
             if not anns and not d.get("null_labeled", False):
                 continue
+
+            img_tags = [str(t).strip() for t in d.get("tags", []) if str(t).strip()]
+            img_tags_lower = set(t.lower() for t in img_tags)
+
+            if normalized_tags:
+                if tag_mode == "all":
+                    if not normalized_tags.issubset(img_tags_lower):
+                        continue
+                else: # "any"
+                    if not (normalized_tags & img_tags_lower):
+                        continue
         except Exception:
             continue
 
-        files.append({"img_path": imgp, "filename": fn, "annotations": anns})
+        files.append({"img_path": imgp, "filename": fn, "annotations": anns, "tags": img_tags})
         for a in anns:
             lbl = a.get("label") or a.get("class")
             if lbl:
                 clses.add(lbl)
 
     return files, clses
+
 
 
 def _split(files, train_pct, val_pct, test_pct):
@@ -231,8 +247,10 @@ def _process_export(task_id: str, req: ExportRequest):
     try:
         _set_task_status(task_id, "processing")
         
-        files, unique_classes = _gather_from_version(req.project_id, req.dataset_id, req.version_id)
+        files, unique_classes = _gather_from_version(req.project_id, req.dataset_id, req.version_id, req.tags, req.tag_mode)
         if not files:
+            if req.tags:
+                raise Exception("No annotated images in this dataset version match the selected tag filter.")
             raise Exception("No annotated images found in this dataset version. Add images first.")
 
         classes_list = sorted(unique_classes) or ["object"]
@@ -271,6 +289,8 @@ def _process_export(task_id: str, req: ExportRequest):
             "train_pct":   req.train_pct,
             "val_pct":     req.val_pct,
             "test_pct":    req.test_pct,
+            "tags":        req.tags,
+            "tag_mode":    req.tag_mode,
             "image_count": len(files),
             "train_count": len(splits["train"]),
             "valid_count": len(splits["valid"]),

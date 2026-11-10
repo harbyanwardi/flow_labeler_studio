@@ -159,7 +159,56 @@ def list_version_images(project_id: str, dataset_id: str, version_id: str):
         annp = os.path.join(batches_dir, img["batch_id"], "annotations", f"{img['filename']}.json")
         img["annotated"] = os.path.exists(annp)
         img["url"]       = f"/storage/projects/{project_id}/batches/{img['batch_id']}/images/{img['filename']}"
+        tags = []
+        if os.path.exists(annp):
+            try:
+                with open(annp, "r", encoding="utf-8") as f:
+                    d = json.load(f)
+                    tags = d.get("tags", [])
+            except Exception:
+                pass
+        img["tags"] = tags
     return imgs
+
+
+@router.get("/{project_id}/datasets/{dataset_id}/versions/{version_id}/tags")
+def get_version_tags(project_id: str, dataset_id: str, version_id: str):
+    """Return all unique tags in this dataset version, along with counts."""
+    imgf = os.path.join(_ver_dir(project_id, dataset_id, version_id), "images.json")
+    if not os.path.exists(imgf):
+        return {"tags": [], "total_images": 0, "tag_counts": {}}
+    
+    refs = _rj(imgf)
+    batches_dir = get_batches_dir(project_id)
+    tag_counts = {}
+    valid_count = 0
+    
+    for ref in refs:
+        bid = ref.get("batch_id")
+        fn  = ref.get("filename")
+        annp = os.path.join(batches_dir, bid, "annotations", f"{fn}.json")
+        imgp = os.path.join(batches_dir, bid, "images", fn)
+        if not os.path.exists(imgp) or not os.path.exists(annp):
+            continue
+        try:
+            with open(annp, "r", encoding="utf-8") as f:
+                d = json.load(f)
+                if not d.get("annotations") and not d.get("null_labeled", False):
+                    continue
+                valid_count += 1
+                for t in d.get("tags", []):
+                    t_clean = str(t).strip()
+                    if t_clean:
+                        tag_counts[t_clean] = tag_counts.get(t_clean, 0) + 1
+        except Exception:
+            continue
+
+    return {
+        "tags": sorted(list(tag_counts.keys())),
+        "total_images": valid_count,
+        "tag_counts": tag_counts
+    }
+
 
 
 @router.post("/{project_id}/datasets/{dataset_id}/versions/{version_id}/add-images")

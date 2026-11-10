@@ -59,6 +59,19 @@ function loadProjectClasses() {
   }
 }
 
+async function loadProjectTags() {
+  if (!state.projectId) return;
+  try {
+    const res = await fetch(`${API}/projects/${state.projectId}/tags`);
+    if (res.ok) {
+      state.projectTags = await res.json();
+    }
+  } catch (e) {
+    console.error("Failed to load project tags:", e);
+  }
+}
+
+
 window.addEventListener("load", () => {
   const savedId = localStorage.getItem("apiflow_project_id");
   const savedName = localStorage.getItem("apiflow_project_name");
@@ -67,6 +80,7 @@ window.addEventListener("load", () => {
     state.projectId = savedId;
     state.projectName = savedName;
     loadProjectClasses();
+    loadProjectTags();
     showScreen("home");
     fetchHome();
   } else {
@@ -345,6 +359,7 @@ function selectProject(id, name) {
   localStorage.setItem("apiflow_project_id", id);
   localStorage.setItem("apiflow_project_name", name);
   loadProjectClasses();
+  loadProjectTags();
   showScreen("home");
   fetchHome();
 }
@@ -548,13 +563,22 @@ function openBatch(batchId) {
   state.currentImageIndex = -1;
   state.currentPage = 1;
   state.annotations = [];
+  state.currentImageTags = [];
   imgObj = null;
   const searchEl = document.getElementById("imgSearch");
   if (searchEl) searchEl.value = "";
+  const tagFilterEl = document.getElementById("imgTagFilter");
+  if (tagFilterEl) tagFilterEl.value = "";
+  const statusFilterEl = document.getElementById("imgStatusFilter");
+  if (statusFilterEl) statusFilterEl.value = "all";
   showScreen("annotate");
   setMode("bbox");
   updateClassSelect();
   renderClassList();
+  renderTagList();
+  loadProjectTags().then(() => {
+    updateImgTagFilterOptions();
+  });
   fetchBatchImages();
 }
 
@@ -652,11 +676,17 @@ function renderVersionImgGrid() {
     const card = document.createElement("div");
     card.className = "version-img-card";
     const batchName = getBatchName(img.batch_id);
+    const tagsHtml = (img.tags && img.tags.length) ? `
+      <div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px;">
+        ${img.tags.map(t => `<span class="badge badge-tag">#${escHtml(t)}</span>`).join('')}
+      </div>
+    ` : '';
     card.innerHTML = `
       <img class="version-img-thumb" src="${API}${img.url}" alt="${escHtml(img.filename)}" loading="lazy">
       <div class="version-img-info">
         <div class="version-img-filename">${escHtml(img.filename)}</div>
         <div class="version-img-src">📦 ${escHtml(batchName)}</div>
+        ${tagsHtml}
       </div>
       <button class="version-img-rm" title="Remove from version" onclick="removeVersionImage('${img.id}')">✕</button>`;
     grid.appendChild(card);
@@ -674,6 +704,11 @@ function renderExportLog(exports) {
   [...exports].reverse().forEach(ex => {
     const date = ex.exported_at ? new Date(ex.exported_at).toLocaleString() : "—";
     const fmtLabel = { yolov11_detect: "YOLOv11 Detect", yolov11_segment: "YOLOv11 Segment", coco: "COCO JSON" }[ex.format] || ex.format;
+    let tagsHtml = "";
+    if (ex.tags && ex.tags.length > 0) {
+      const modeText = ex.tag_mode === "all" ? "AND" : "OR";
+      tagsHtml = `<div style="font-size:10px;color:var(--purple);margin-top:2px;">🏷 Tags (${modeText}): ${ex.tags.map(t => '#' + escHtml(t)).join(', ')}</div>`;
+    }
     const item = document.createElement("div");
     item.className = "export-log-item";
     item.innerHTML = `
@@ -684,7 +719,8 @@ function renderExportLog(exports) {
         <span class="export-split-pill pill-valid">Val ${ex.valid_count || 0}</span>
         <span class="export-split-pill pill-test">Test ${ex.test_count || 0}</span>
       </div>
-      <div class="export-log-imgs">${ex.image_count} images total</div>`;
+      <div class="export-log-imgs">${ex.image_count} images total</div>
+      ${tagsHtml}`;
     el.appendChild(item);
   });
 }
@@ -769,10 +805,11 @@ function renderAddImgList() {
   annotated.forEach(img => {
     const row = document.createElement("label");
     row.className = "add-img-row";
+    const tagsHtml = (img.tags && img.tags.length) ? img.tags.map(t => `<span class="badge badge-tag" style="margin-left:4px;font-size:9px;">#${escHtml(t)}</span>`).join("") : "";
     row.innerHTML = `
       <input type="checkbox" class="add-img-checkbox" value="${escHtml(img.filename)}" checked>
       <img class="add-img-thumb" src="${API}${img.url}" alt="${escHtml(img.filename)}">
-      <span class="add-img-name">${escHtml(img.filename)}</span>
+      <span class="add-img-name">${escHtml(img.filename)} ${tagsHtml}</span>
       <span class="add-img-has-ann">● labeled</span>`;
     el.appendChild(row);
   });
@@ -842,32 +879,120 @@ async function confirmAddToDataset() {
 // ════════════════════════════════════════════════════════════════════
 // EXPORT MODAL
 // ════════════════════════════════════════════════════════════════════
-// frontend/canvas.js (partial view around export modals)
-function openExportModal() {
+let exportVersionTagsData = { tags: [], total_images: 0, tag_counts: {} };
+let selectedExportTags = new Set();
+
+async function openExportModal() {
   exportCtx.datasetId = state.activeDatasetId;
   exportCtx.versionId = state.activeVersionId;
+  selectedExportTags.clear();
+  await _loadVersionTagsForExport();
   _fillExportInfo();
   openModal("exportModal");
 }
 
-function quickExportVersion(dsId, verId) {
+async function quickExportVersion(dsId, verId) {
   exportCtx.datasetId = dsId;
   exportCtx.versionId = verId;
   state.activeDatasetId = dsId;
   state.activeVersionId = verId;
+  selectedExportTags.clear();
+  await _loadVersionTagsForExport();
   _fillExportInfo();
   openModal("exportModal");
+}
+
+async function _loadVersionTagsForExport() {
+  const gridEl = document.getElementById("exportTagsGrid");
+  if (gridEl) {
+    gridEl.innerHTML = `<span style="font-size:11px;color:var(--text-3);">Loading tags...</span>`;
+  }
+  try {
+    const res = await fetch(`${API}/datasets/${state.projectId}/datasets/${exportCtx.datasetId}/versions/${exportCtx.versionId}/tags`);
+    if (res.ok) {
+      exportVersionTagsData = await res.json();
+    } else {
+      exportVersionTagsData = { tags: [], total_images: 0, tag_counts: {} };
+    }
+  } catch (e) {
+    console.error("Failed to load version tags:", e);
+    exportVersionTagsData = { tags: [], total_images: 0, tag_counts: {} };
+  }
+  _renderExportTagsList();
+}
+
+function _renderExportTagsList() {
+  const gridEl = document.getElementById("exportTagsGrid");
+  if (!gridEl) return;
+  const tags = exportVersionTagsData.tags || [];
+  if (tags.length === 0) {
+    gridEl.innerHTML = `<span style="font-size:11px;color:var(--text-3);font-style:italic;">No tags found in this dataset version. (All images will be exported)</span>`;
+    return;
+  }
+
+  gridEl.innerHTML = tags.map(tag => {
+    const isChecked = selectedExportTags.has(tag);
+    const count = exportVersionTagsData.tag_counts[tag] || 0;
+    return `
+      <label class="export-tag-chip ${isChecked ? 'selected' : ''}">
+        <input type="checkbox" class="export-tag-cb" value="${escHtml(tag)}" ${isChecked ? 'checked' : ''} onchange="toggleExportTag('${escHtml(tag)}', this.checked)">
+        <span class="export-tag-name">#${escHtml(tag)}</span>
+        <span class="export-tag-count">(${count})</span>
+      </label>
+    `;
+  }).join("");
+}
+
+function toggleExportTag(tag, checked) {
+  if (checked) {
+    selectedExportTags.add(tag);
+  } else {
+    selectedExportTags.delete(tag);
+  }
+  _renderExportTagsList();
+  _fillExportInfo();
+}
+
+function selectAllExportTags() {
+  (exportVersionTagsData.tags || []).forEach(t => selectedExportTags.add(t));
+  _renderExportTagsList();
+  _fillExportInfo();
+}
+
+function clearExportTags() {
+  selectedExportTags.clear();
+  _renderExportTagsList();
+  _fillExportInfo();
+}
+
+function onExportTagSelectionChange() {
+  _fillExportInfo();
 }
 
 function _fillExportInfo() {
   const ds = state.datasets.find(d => d.id === exportCtx.datasetId) || {};
   const ver = (ds.versions || []).find(v => v.id === exportCtx.versionId) || {};
-  const imgCount = ver.image_count || 0;
+  const totalImg = exportVersionTagsData.total_images || ver.image_count || 0;
   const infoEl = document.getElementById("exportVersionInfo");
-  if (infoEl) infoEl.innerHTML = `
-    <strong style="color:var(--text-1);">${escHtml(ds.name || "?")} — ${escHtml(ver.name || "?")}</strong><br>
-    ${imgCount} image${imgCount !== 1 ? "s" : ""} will be exported.<br>
-    <span style="color:var(--text-3);">Images will be randomly shuffled and split into train/valid/test folders.</span>`;
+
+  const selectedList = Array.from(selectedExportTags);
+  const modeRadio = document.querySelector('input[name="exportTagMode"]:checked');
+  const mode = modeRadio ? modeRadio.value : "any";
+
+  let tagFilterText = "";
+  if (selectedList.length > 0) {
+    const modeLabel = mode === "all" ? "ALL of" : "ANY of";
+    tagFilterText = `<br><span style="color:var(--purple);font-weight:600;">🏷 Tag filter applied:</span> Only images containing <strong>${modeLabel}</strong>: ${selectedList.map(t => '#' + escHtml(t)).join(", ")}.`;
+  } else {
+    tagFilterText = `<br><span style="color:var(--text-3);">No tag filter active — all images in this version will be exported.</span>`;
+  }
+
+  if (infoEl) {
+    infoEl.innerHTML = `
+      <strong style="color:var(--text-1);">${escHtml(ds.name || "?")} — ${escHtml(ver.name || "?")}</strong><br>
+      Total version images: <strong>${totalImg}</strong>.${tagFilterText}<br>
+      <span style="color:var(--text-3);">Images will be randomly shuffled and split into train/valid/test folders.</span>`;
+  }
 }
 
 function onSplitChange() {
@@ -901,6 +1026,10 @@ async function doExport() {
   const testPct = +document.getElementById("sliderTest").value;
   if (trainPct + valPct + testPct !== 100) { alert("Split must total 100%."); return; }
 
+  const selectedList = Array.from(selectedExportTags);
+  const modeRadio = document.querySelector('input[name="exportTagMode"]:checked');
+  const tagMode = modeRadio ? modeRadio.value : "any";
+
   const btn = document.getElementById("exportDownloadBtn");
   if (btn) { btn.disabled = true; btn.innerHTML = `<span class="spinner"></span> Generating…`; }
 
@@ -913,6 +1042,8 @@ async function doExport() {
         version_id: versionId,
         format: document.getElementById("exportFormat").value,
         train_pct: trainPct, val_pct: valPct, test_pct: testPct,
+        tags: selectedList,
+        tag_mode: tagMode,
       }),
     });
     if (!res.ok) {
@@ -996,21 +1127,29 @@ async function fetchBatchImages(targetIndexAfterLoad = null) {
   const query = searchEl ? searchEl.value.trim() : "";
   const filterEl = document.getElementById("imgStatusFilter");
   const filterStatus = filterEl ? filterEl.value : "all";
+  const tagFilterEl = document.getElementById("imgTagFilter");
+  const filterTag = tagFilterEl ? tagFilterEl.value : "";
   
   try {
-    const r = await fetch(`${API}/batches/${state.projectId}/batches/${state.activeBatchId}/images?page=${state.currentPage}&limit=${state.limit}&search=${encodeURIComponent(query)}&status=${filterStatus}`);
+    const r = await fetch(`${API}/batches/${state.projectId}/batches/${state.activeBatchId}/images?page=${state.currentPage}&limit=${state.limit}&search=${encodeURIComponent(query)}&status=${filterStatus}&tag=${encodeURIComponent(filterTag)}`);
     const data = await r.json();
     state.images = data.images || [];
     state.totalImages = data.total || 0;
     
-    // Register any classes loaded from the image summaries
+    // Register any classes and tags loaded from the image summaries
     state.images.forEach(img => {
       (img.classes || []).forEach(c => {
         if (!state.classes.includes(c)) {
           addClass(c);
         }
       });
+      (img.tags || []).forEach(t => {
+        if (t && !state.projectTags.includes(t)) {
+          state.projectTags.push(t);
+        }
+      });
     });
+    updateImgTagFilterOptions();
   } catch (e) {
     console.error(e);
     state.images = [];
@@ -1122,6 +1261,10 @@ function renderImageList() {
       const cb = document.createElement("span");
       cb.className = "badge badge-class"; cb.textContent = c; meta.appendChild(cb);
     });
+    (img.tags || []).forEach(t => {
+      const tb = document.createElement("span");
+      tb.className = "badge badge-tag"; tb.textContent = "#" + t; meta.appendChild(tb);
+    });
     det.appendChild(nm); det.appendChild(meta);
 
     const del = document.createElement("button");
@@ -1145,6 +1288,7 @@ async function loadImage(idx) {
   state.annotations = [];
   imgObj = null;
   state.nullLabeled = false;
+  state.currentImageTags = [];
   state.tempPoints = []; 
   state.selected = null;
   if (typeof ctx !== "undefined" && ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -1160,6 +1304,7 @@ async function loadImage(idx) {
     const d = await r.json();
     state.annotations = d.annotations || [];
     state.nullLabeled = d.null_labeled || false;
+    state.currentImageTags = d.tags || [];
     
     // Register any loaded annotation classes
     state.annotations.forEach(ann => {
@@ -1167,9 +1312,17 @@ async function loadImage(idx) {
         addClass(ann.label);
       }
     });
+
+    // Register any loaded tags
+    state.currentImageTags.forEach(t => {
+      if (t && !state.projectTags.includes(t)) {
+        state.projectTags.push(t);
+      }
+    });
   } catch { 
     state.annotations = []; 
     state.nullLabeled = false;
+    state.currentImageTags = [];
   }
 
   updateNullLabelButton();
@@ -1179,7 +1332,7 @@ async function loadImage(idx) {
     imgObj = el;
     fitImage();
     if (dimInfo) dimInfo.textContent = `${el.naturalWidth}×${el.naturalHeight} · ${img.filename}`;
-    renderClassList(); renderAnnotationList(); draw();
+    renderClassList(); renderAnnotationList(); renderTagList(); draw();
   };
   el.src = `${API}${img.url}`;
 }
@@ -1194,7 +1347,8 @@ async function saveAnnotations(notify = false) {
     body: JSON.stringify({ 
       image: img.filename, 
       annotations: state.annotations,
-      null_labeled: state.nullLabeled || false
+      null_labeled: state.nullLabeled || false,
+      tags: state.currentImageTags || []
     }),
   });
   
@@ -1202,6 +1356,7 @@ async function saveAnnotations(notify = false) {
   state.images[state.currentImageIndex].annotated = (state.annotations.length > 0 || state.nullLabeled);
   state.images[state.currentImageIndex].null_labeled = state.nullLabeled || false;
   state.images[state.currentImageIndex].classes = [...new Set(state.annotations.map(a => a.label).filter(Boolean))];
+  state.images[state.currentImageIndex].tags = [...(state.currentImageTags || [])];
   
   renderImageList();
 }
@@ -1385,6 +1540,111 @@ function renderClassList() {
       <span class="badge badge-class">${counts[cls] || 0}</span>`;
     el.appendChild(it);
   });
+}
+
+// ════════════════════════════════════════════════════════════════════
+// IMAGE TAGS
+// ════════════════════════════════════════════════════════════════════
+function updateImgTagFilterOptions() {
+  const el = document.getElementById("imgTagFilter");
+  if (!el) return;
+  const currentVal = el.value;
+  let options = '<option value="">All Tags</option>';
+  (state.projectTags || []).forEach(t => {
+    options += `<option value="${escHtml(t)}" ${t === currentVal ? "selected" : ""}>#${escHtml(t)}</option>`;
+  });
+  el.innerHTML = options;
+}
+
+function renderTagList() {
+  const listEl = document.getElementById("imageTagsList");
+  const countBadge = document.getElementById("tagCountBadge");
+  const datalist = document.getElementById("projectTagsDatalist");
+  const suggEl = document.getElementById("projectTagSuggestions");
+
+  if (!listEl) return;
+
+  const currentTags = state.currentImageTags || [];
+  if (countBadge) {
+    countBadge.textContent = `${currentTags.length} tag${currentTags.length !== 1 ? "s" : ""}`;
+  }
+
+  // Render current tags on image
+  if (currentTags.length === 0) {
+    listEl.innerHTML = `<span style="color:var(--text-3);font-size:11px;font-style:italic;">No tags on this image</span>`;
+  } else {
+    listEl.innerHTML = currentTags.map(t => `
+      <span class="tag-chip">
+        <span>#${escHtml(t)}</span>
+        <button type="button" class="tag-chip-remove" onclick="removeTag('${escHtml(t)}')" title="Remove tag">&times;</button>
+      </span>
+    `).join("");
+  }
+
+  // Populate datalist for autocomplete
+  if (datalist) {
+    datalist.innerHTML = (state.projectTags || []).map(t => `<option value="${escHtml(t)}"></option>`).join("");
+  }
+
+  // Populate quick suggestions (project tags not yet applied to this image)
+  if (suggEl) {
+    const unused = (state.projectTags || []).filter(t => !currentTags.includes(t));
+    if (unused.length > 0) {
+      suggEl.innerHTML = `
+        <span style="font-size:10px;color:var(--text-3);width:100%;margin-bottom:2px;">Quick add:</span>
+        ` + unused.slice(0, 8).map(t => `
+          <button type="button" class="tag-suggestion-pill" onclick="addTag('${escHtml(t)}')">+ ${escHtml(t)}</button>
+        `).join("");
+    } else {
+      suggEl.innerHTML = "";
+    }
+  }
+
+  updateImgTagFilterOptions();
+}
+
+async function addTag(tag) {
+  if (state.currentImageIndex === -1) return;
+  const cleaned = tag.trim().toLowerCase();
+  if (!cleaned) return;
+
+  if (!state.currentImageTags) state.currentImageTags = [];
+  if (!state.currentImageTags.includes(cleaned)) {
+    state.currentImageTags.push(cleaned);
+  }
+
+  if (!state.projectTags) state.projectTags = [];
+  if (!state.projectTags.includes(cleaned)) {
+    state.projectTags.push(cleaned);
+    if (state.projectId) {
+      fetch(`${API}/projects/${state.projectId}/tags`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tag: cleaned })
+      }).catch(console.error);
+    }
+  }
+
+  renderTagList();
+  await saveAnnotations(false);
+}
+
+async function removeTag(tag) {
+  if (state.currentImageIndex === -1 || !state.currentImageTags) return;
+  state.currentImageTags = state.currentImageTags.filter(t => t !== tag);
+  renderTagList();
+  await saveAnnotations(false);
+}
+
+function handleAddTag() {
+  const inp = document.getElementById("newTagInput");
+  if (!inp) return;
+  const val = inp.value.trim();
+  if (!val) return;
+
+  const tags = val.split(",").map(t => t.trim()).filter(Boolean);
+  tags.forEach(t => addTag(t));
+  inp.value = "";
 }
 
 // ════════════════════════════════════════════════════════════════════

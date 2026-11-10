@@ -117,11 +117,14 @@
             </div>
             <input type="text" id="imgSearch" class="input-search" placeholder="Search filename…"
               oninput="handleSearchInput()">
-            <div style="display:flex; margin-top: 6px;">
-              <select id="imgStatusFilter" class="input-search" style="padding: 4px; font-size: 11px;" onchange="handleSearchInput()">
+            <div style="display:flex; margin-top: 6px; gap: 6px;">
+              <select id="imgStatusFilter" class="input-search" style="padding: 4px; font-size: 11px; flex: 1;" onchange="handleSearchInput()">
                 <option value="all">All Status</option>
                 <option value="unlabeled">Unlabeled</option>
                 <option value="labeled">Labeled</option>
+              </select>
+              <select id="imgTagFilter" class="input-search" style="padding: 4px; font-size: 11px; flex: 1;" onchange="handleSearchInput()">
+                <option value="">All Tags</option>
               </select>
             </div>
           </div>
@@ -180,6 +183,23 @@
             <div class="add-cls-form">
               <input type="text" id="newClassInput" class="add-cls-input" placeholder="New class…">
               <button class="btn btn-sm btn-primary" onclick="handleAddClass()">Add</button>
+            </div>
+          </div>
+          <div class="sidebar-section">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+              <span class="sidebar-section-title">Image Tags</span>
+              <span id="tagCountBadge" style="font-size:10px;color:var(--text-3);font-weight:600;">0 tags</span>
+            </div>
+            <div id="imageTagsList" class="tag-chips-wrap">
+              <!-- rendered by JS -->
+            </div>
+            <div class="add-cls-form">
+              <input type="text" id="newTagInput" class="add-cls-input" placeholder="New tag or select…" list="projectTagsDatalist" onkeydown="if(event.key==='Enter'){handleAddTag();event.preventDefault();}">
+              <datalist id="projectTagsDatalist"></datalist>
+              <button class="btn btn-sm btn-primary" onclick="handleAddTag()">+ Tag</button>
+            </div>
+            <div id="projectTagSuggestions" class="tag-suggestions-wrap" style="margin-top:6px;">
+              <!-- quick add pills -->
             </div>
           </div>
           <div class="sidebar-section" style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
@@ -404,6 +424,34 @@
           </select>
         </div>
 
+        <!-- Tag Filter Section -->
+        <div class="form-group">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+            <label class="form-label" style="margin:0;">Filter by Tags (Optional)</label>
+            <div style="display:flex; gap:8px;">
+              <button type="button" class="btn btn-sm btn-ghost" style="padding:1px 6px; font-size:10px; min-height:unset;" onclick="selectAllExportTags()">Select All</button>
+              <button type="button" class="btn btn-sm btn-ghost" style="padding:1px 6px; font-size:10px; min-height:unset;" onclick="clearExportTags()">Clear</button>
+            </div>
+          </div>
+          <div style="font-size:11px; color:var(--text-3); margin-bottom:6px;">
+            Select one or more tags to filter which images are exported. If no tags are selected, all images will be exported.
+          </div>
+          <div class="export-tags-wrap">
+            <div class="export-tags-grid" id="exportTagsGrid">
+              <!-- rendered by JS -->
+            </div>
+          </div>
+          <div style="display:flex; gap:16px; align-items:center; font-size:11px; color:var(--text-2); margin-top:6px;">
+            <span style="font-weight:600;">Filter match mode:</span>
+            <label style="cursor:pointer; display:flex; align-items:center; gap:4px;">
+              <input type="radio" name="exportTagMode" value="any" checked onchange="onExportTagSelectionChange()"> Any selected tag (OR)
+            </label>
+            <label style="cursor:pointer; display:flex; align-items:center; gap:4px;">
+              <input type="radio" name="exportTagMode" value="all" onchange="onExportTagSelectionChange()"> All selected tags (AND)
+            </label>
+          </div>
+        </div>
+
         <div class="form-group">
           <label class="form-label">Train / Validation / Test Split</label>
           <div class="split-row">
@@ -499,8 +547,8 @@
   </div>
 
   <!-- SCRIPTS -->
-  <script src="static/state.js"></script>
-  <script src="static/canvas.js?v=3"></script>
+  <script src="static/state.js?v=4"></script>
+  <script src="static/canvas.js?v=4"></script>
 </body>
 
 </html>

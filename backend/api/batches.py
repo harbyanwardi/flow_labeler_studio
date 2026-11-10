@@ -249,7 +249,7 @@ def delete_batch(project_id: str, batch_id: str):
 # ── IMAGES IN BATCH ────────────────────────────────────────────────────
 
 @router.get("/{project_id}/batches/{batch_id}/images")
-def list_batch_images(project_id: str, batch_id: str, page: int = 1, limit: int = 10, search: str = "", status: str = "all"):
+def list_batch_images(project_id: str, batch_id: str, page: int = 1, limit: int = 10, search: str = "", status: str = "all", tag: str = ""):
     batch_dir = os.path.join(get_batches_dir(project_id), batch_id)
     if not os.path.exists(batch_dir):
         raise HTTPException(status_code=404, detail="Batch not found")
@@ -262,25 +262,34 @@ def list_batch_images(project_id: str, batch_id: str, page: int = 1, limit: int 
     all_files = sorted(os.listdir(images_dir))
     matching_files = []
     search_lower = search.lower().strip() if search else ""
+    tag_lower = tag.lower().strip() if tag else ""
+
     for name in all_files:
         if not name.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
             continue
         if search_lower and search_lower not in name.lower():
             continue
             
+        ann_path = os.path.join(annotations_dir, f"{name}.json")
+        has_ann = False
+        img_tags = []
+        if os.path.exists(ann_path):
+            try:
+                with open(ann_path, "r", encoding="utf-8") as f:
+                    d = json.load(f)
+                    has_ann = len(d.get("annotations", [])) > 0 or d.get("null_labeled", False)
+                    img_tags = d.get("tags", [])
+            except Exception:
+                pass
+
         if status != "all":
-            ann_path = os.path.join(annotations_dir, f"{name}.json")
-            has_ann = False
-            if os.path.exists(ann_path):
-                try:
-                    with open(ann_path, "r", encoding="utf-8") as f:
-                        d = json.load(f)
-                        has_ann = len(d.get("annotations", [])) > 0 or d.get("null_labeled", False)
-                except Exception:
-                    pass
             if status == "labeled" and not has_ann:
                 continue
             if status == "unlabeled" and has_ann:
+                continue
+
+        if tag_lower:
+            if not any(str(t).lower().strip() == tag_lower for t in img_tags):
                 continue
                 
         matching_files.append(name)
@@ -300,6 +309,7 @@ def list_batch_images(project_id: str, batch_id: str, page: int = 1, limit: int 
         ann_path = os.path.join(annotations_dir, f"{name}.json")
         has_ann = False
         classes = []
+        tags = []
         if os.path.exists(ann_path):
             try:
                 with open(ann_path, "r", encoding="utf-8") as f:
@@ -307,6 +317,7 @@ def list_batch_images(project_id: str, batch_id: str, page: int = 1, limit: int 
                     anns = d.get("annotations", [])
                     has_ann = len(anns) > 0 or d.get("null_labeled", False)
                     classes = list(set(a.get("label") for a in anns if a.get("label")))
+                    tags = d.get("tags", [])
             except Exception:
                 pass
         files.append({
@@ -314,6 +325,7 @@ def list_batch_images(project_id: str, batch_id: str, page: int = 1, limit: int 
             "url": f"/storage/projects/{project_id}/batches/{batch_id}/images/{name}",
             "annotated": has_ann,
             "classes": classes,
+            "tags": tags,
         })
     return {"images": files, "total": total, "page": page, "limit": limit}
 
@@ -362,8 +374,11 @@ def get_batch_annotation(project_id: str, batch_id: str, image_name: str):
     ann_path = os.path.join(get_batches_dir(project_id), batch_id, "annotations", f"{image_name}.json")
     if os.path.exists(ann_path):
         with open(ann_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {"image": image_name, "annotations": []}
+            d = json.load(f)
+            if "tags" not in d:
+                d["tags"] = []
+            return d
+    return {"image": image_name, "annotations": [], "tags": []}
 
 
 @router.post("/{project_id}/batches/{batch_id}/annotations")
@@ -376,6 +391,16 @@ def save_batch_annotation(project_id: str, batch_id: str, data: dict):
     image_name = data.get("image")
     if not image_name:
         raise HTTPException(status_code=400, detail="Missing 'image' key")
+
+    # If tags are provided, update project-level tags
+    tags = data.get("tags", [])
+    if tags:
+        try:
+            from backend.api.projects import add_project_tags
+            add_project_tags(project_id, tags)
+        except Exception:
+            pass
+
     with open(os.path.join(annotations_dir, f"{image_name}.json"), "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
     return {"status": "success"}

@@ -26,6 +26,18 @@ def save_project_meta(project_id: str, meta: dict):
         json.dump(meta, f, indent=2, ensure_ascii=False)
 
 
+def add_project_tags(project_id: str, new_tags: list):
+    meta = get_project_meta(project_id)
+    current = set(meta.get("tags", []))
+    for t in new_tags:
+        t_clean = str(t).strip()
+        if t_clean:
+            current.add(t_clean)
+    meta["tags"] = sorted(list(current))
+    save_project_meta(project_id, meta)
+
+
+
 @router.get("/list")
 def list_projects():
     projects = []
@@ -84,3 +96,43 @@ def delete_project(project_id: str):
         raise HTTPException(status_code=404, detail="Project not found")
     shutil.rmtree(project_dir)
     return {"status": "deleted"}
+
+
+@router.get("/{project_id}/tags")
+def get_project_tags(project_id: str):
+    tags = set()
+    # 1. From project meta
+    meta = get_project_meta(project_id)
+    for t in meta.get("tags", []):
+        t_clean = str(t).strip()
+        if t_clean:
+            tags.add(t_clean)
+
+    # 2. Scan batch annotations for any tags saved on images
+    batches_dir = os.path.join(PROJECTS_DIR, project_id, "batches")
+    if os.path.exists(batches_dir):
+        for bid in os.listdir(batches_dir):
+            ann_dir = os.path.join(batches_dir, bid, "annotations")
+            if os.path.isdir(ann_dir):
+                for f in os.listdir(ann_dir):
+                    if f.endswith(".json"):
+                        try:
+                            with open(os.path.join(ann_dir, f), "r", encoding="utf-8") as jf:
+                                d = json.load(jf)
+                                for t in d.get("tags", []):
+                                    t_clean = str(t).strip()
+                                    if t_clean:
+                                        tags.add(t_clean)
+                        except Exception:
+                            pass
+    return sorted(list(tags))
+
+
+@router.post("/{project_id}/tags")
+def create_project_tag(project_id: str, body: dict):
+    tag = str(body.get("tag", "")).strip()
+    if not tag:
+        raise HTTPException(status_code=400, detail="Tag cannot be empty")
+    add_project_tags(project_id, [tag])
+    return {"status": "success", "tag": tag}
+

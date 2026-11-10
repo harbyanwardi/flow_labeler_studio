@@ -28,6 +28,9 @@ const state = {
   annotations: [],
   tempPoints: [],
   selected: null,
+  currentImageTags: [],
+  projectTags: [],
+
 
   // ── DRAWING ───────────────────────────────────────────────────────
   mode: "bbox",       // 'bbox' | 'polygon' | 'pan'
