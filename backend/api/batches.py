@@ -333,7 +333,7 @@ def list_batch_images(project_id: str, batch_id: str, page: int = 1, limit: int 
                     raw_tags = d.get("tags", [])
                     has_ann = len(anns) > 0 or d.get("null_labeled", False) or len(raw_tags) > 0
                     classes = list(set(a.get("label") for a in anns if a.get("label")))
-                    tags = [str(t).strip().lstrip("#") for t in raw_tags if str(t).strip()]
+                    tags = [str(t).strip().lower().lstrip("#") for t in raw_tags if str(t).strip()]
             except Exception:
                 pass
         files.append({
@@ -417,12 +417,15 @@ def save_batch_annotation(project_id: str, batch_id: str, data: dict):
 
     # If tags are provided, update project-level tags
     tags = data.get("tags", [])
-    if tags:
-        try:
-            from backend.api.projects import add_project_tags
-            add_project_tags(project_id, tags)
-        except Exception:
-            pass
+    if tags is not None:
+        cleaned_tags = [str(t).strip().lower().lstrip("#") for t in tags if str(t).strip()]
+        data["tags"] = cleaned_tags
+        if cleaned_tags:
+            try:
+                from backend.api.projects import add_project_tags
+                add_project_tags(project_id, cleaned_tags)
+            except Exception:
+                pass
 
     with open(os.path.join(annotations_dir, f"{image_name}.json"), "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)

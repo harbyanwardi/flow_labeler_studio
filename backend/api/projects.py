@@ -28,9 +28,9 @@ def save_project_meta(project_id: str, meta: dict):
 
 def add_project_tags(project_id: str, new_tags: list):
     meta = get_project_meta(project_id)
-    current = set(meta.get("tags", []))
+    current = set(str(t).strip().lower().lstrip("#") for t in meta.get("tags", []) if str(t).strip())
     for t in new_tags:
-        t_clean = str(t).strip()
+        t_clean = str(t).strip().lower().lstrip("#")
         if t_clean:
             current.add(t_clean)
     meta["tags"] = sorted(list(current))
@@ -98,6 +98,7 @@ def create_project(body: dict):
         "id": project_id,
         "name": name,
         "created_at": datetime.datetime.now().isoformat(),
+        "tags": [],
     }
     save_project_meta(project_id, meta)
     
@@ -118,15 +119,12 @@ def delete_project(project_id: str):
 
 @router.get("/{project_id}/tags")
 def get_project_tags(project_id: str):
-    tags = set()
-    # 1. From project meta
     meta = get_project_meta(project_id)
-    for t in meta.get("tags", []):
-        t_clean = str(t).strip()
-        if t_clean:
-            tags.add(t_clean)
+    if "tags" in meta:
+        return sorted(list(set(str(t).strip().lower().lstrip("#") for t in meta.get("tags", []) if str(t).strip())))
 
-    # 2. Scan batch annotations for any tags saved on images
+    tags = set()
+    # Fallback: scan batch annotations only if meta has no "tags" field, and cache result
     batches_dir = os.path.join(PROJECTS_DIR, project_id, "batches")
     if os.path.exists(batches_dir):
         for bid in os.listdir(batches_dir):
@@ -135,20 +133,28 @@ def get_project_tags(project_id: str):
                 for f in os.listdir(ann_dir):
                     if f.endswith(".json"):
                         try:
-                            with open(os.path.join(ann_dir, f), "r", encoding="utf-8") as jf:
+                            full_path = os.path.join(ann_dir, f)
+                            with open(full_path, "rb") as fp:
+                                if b'"tags"' not in fp.read():
+                                    continue
+                            with open(full_path, "r", encoding="utf-8") as jf:
                                 d = json.load(jf)
                                 for t in d.get("tags", []):
-                                    t_clean = str(t).strip()
+                                    t_clean = str(t).strip().lower().lstrip("#")
                                     if t_clean:
                                         tags.add(t_clean)
                         except Exception:
                             pass
-    return sorted(list(tags))
+    # Save back to meta so future calls are instant!
+    clean_list = sorted(list(tags))
+    meta["tags"] = clean_list
+    save_project_meta(project_id, meta)
+    return clean_list
 
 
 @router.post("/{project_id}/tags")
 def create_project_tag(project_id: str, body: dict):
-    tag = str(body.get("tag", "")).strip()
+    tag = str(body.get("tag", "")).strip().lower().lstrip("#")
     if not tag:
         raise HTTPException(status_code=400, detail="Tag cannot be empty")
     add_project_tags(project_id, [tag])

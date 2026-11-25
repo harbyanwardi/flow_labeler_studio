@@ -60,15 +60,26 @@ function loadProjectClasses() {
 }
 
 async function loadProjectTags() {
-  if (!state.projectId) return;
+  if (!state.projectId) return [];
   try {
     const res = await fetch(`${API}/projects/${state.projectId}/tags`);
     if (res.ok) {
-      state.projectTags = await res.json();
+      const raw = await res.json();
+      const cleaned = (Array.isArray(raw) ? raw : [])
+        .map(t => strCleanTag(t))
+        .filter(Boolean);
+      state.projectTags = Array.from(new Set([
+        ...(state.projectTags || []).map(t => strCleanTag(t)),
+        ...cleaned
+      ])).filter(Boolean).sort();
+      updateImgTagFilterOptions();
+      renderTagList();
+      return state.projectTags;
     }
   } catch (e) {
     console.error("Failed to load project tags:", e);
   }
+  return state.projectTags || [];
 }
 
 
@@ -594,7 +605,7 @@ async function deleteBatch(id) {
   fetchHome();
 }
 
-function openBatch(batchId) {
+async function openBatch(batchId) {
   state.activeBatchId = batchId;
   state.images = [];
   state.currentImageIndex = -1;
@@ -613,10 +624,15 @@ function openBatch(batchId) {
   updateClassSelect();
   renderClassList();
   renderTagList();
-  loadProjectTags().then(() => {
-    updateImgTagFilterOptions();
-  });
-  fetchBatchImages();
+  updateImgTagFilterOptions();
+
+  // Load project tags and batch images in parallel, coordinating completion
+  await Promise.all([
+    loadProjectTags(),
+    fetchBatchImages()
+  ]);
+  renderTagList();
+  updateImgTagFilterOptions();
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1668,6 +1684,15 @@ async function fetchBatchImages(targetIndexAfterLoad = null) {
     state.totalBatchImages = data.total_batch_images || data.total || 0;
     state.batchTagCounts = data.tag_counts || {};
 
+    if (!state.projectTags) state.projectTags = [];
+    // Register batch-wide tags from tag_counts across the entire batch
+    Object.keys(state.batchTagCounts).forEach(t => {
+      const ct = strCleanTag(t);
+      if (ct && !state.projectTags.includes(ct)) {
+        state.projectTags.push(ct);
+      }
+    });
+
     // Register any classes and tags loaded from the image summaries
     state.images.forEach(img => {
       (img.classes || []).forEach(c => {
@@ -1683,6 +1708,7 @@ async function fetchBatchImages(targetIndexAfterLoad = null) {
       });
     });
 
+    renderTagList();
     updateImgTagFilterOptions();
 
     // Update images count badge in sidebar header
@@ -2153,7 +2179,7 @@ function updateImgTagFilterOptions() {
 
   // Collect all unique tags
   const allTagKeys = new Set([
-    ...Object.keys(counts),
+    ...Object.keys(counts).map(t => strCleanTag(t)),
     ...(state.projectTags || []).map(t => strCleanTag(t))
   ]);
   const sortedTags = Array.from(allTagKeys).filter(Boolean).sort();
@@ -2199,7 +2225,7 @@ function renderTagList() {
   if (datalist) {
     const allTags = Array.from(new Set([
       ...(state.projectTags || []).map(t => strCleanTag(t)),
-      ...Object.keys(state.batchTagCounts || {})
+      ...Object.keys(state.batchTagCounts || {}).map(t => strCleanTag(t))
     ])).filter(Boolean).sort();
     datalist.innerHTML = allTags.map(t => `<option value="${escHtml(t)}"></option>`).join("");
   }
@@ -2208,10 +2234,10 @@ function renderTagList() {
   if (suggEl) {
     const allTags = Array.from(new Set([
       ...(state.projectTags || []).map(t => strCleanTag(t)),
-      ...Object.keys(state.batchTagCounts || {})
+      ...Object.keys(state.batchTagCounts || {}).map(t => strCleanTag(t))
     ])).filter(Boolean).sort();
     const unused = allTags.filter(t => !currentTags.includes(t));
-    if (unused.length > 0) {
+    if (unused.length > 0 && state.currentImageIndex !== -1) {
       suggEl.innerHTML = `
         <span style="font-size:10px;color:var(--text-3);width:100%;margin-bottom:2px;">Quick add:</span>
         ` + unused.slice(0, 8).map(t => `
