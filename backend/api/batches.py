@@ -41,6 +41,7 @@ def get_batch_image_stats(project_id: str, batch_id: str) -> dict:
 
     total = 0
     labeled = 0
+    tag_counts = {}
     if os.path.exists(images_dir):
         for name in os.listdir(images_dir):
             if name.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
@@ -50,11 +51,16 @@ def get_batch_image_stats(project_id: str, batch_id: str) -> dict:
                     try:
                         with open(ann_path, "r", encoding="utf-8") as f:
                             d = json.load(f)
-                            if d.get("annotations") or d.get("null_labeled", False):
+                            raw_tags = d.get("tags", [])
+                            if d.get("annotations") or d.get("null_labeled", False) or raw_tags:
                                 labeled += 1
+                            for t in raw_tags:
+                                tc = str(t).strip().lower().lstrip("#")
+                                if tc:
+                                    tag_counts[tc] = tag_counts.get(tc, 0) + 1
                     except Exception:
                         pass
-    return {"total": total, "labeled": labeled}
+    return {"total": total, "labeled": labeled, "tag_counts": tag_counts}
 
 
 # ── BATCHES ────────────────────────────────────────────────────────────
@@ -77,6 +83,7 @@ def list_batches(project_id: str):
             "created_at": meta.get("created_at", ""),
             "total_images": stats["total"],
             "labeled_images": stats["labeled"],
+            "tag_counts": stats.get("tag_counts", {})
         })
     batches.sort(key=lambda x: x["created_at"], reverse=True)
     return batches
@@ -257,19 +264,21 @@ def list_batch_images(project_id: str, batch_id: str, page: int = 1, limit: int 
     images_dir = os.path.join(batch_dir, "images")
     annotations_dir = os.path.join(batch_dir, "annotations")
     if not os.path.exists(images_dir):
-        return {"images": [], "total": 0, "page": page, "limit": limit}
+        return {"images": [], "total": 0, "page": page, "limit": limit, "tag_counts": {}, "total_batch_images": 0}
 
     all_files = sorted(os.listdir(images_dir))
     matching_files = []
     search_lower = search.lower().strip() if search else ""
-    tag_lower = tag.lower().strip() if tag else ""
+    tag_clean = tag.lower().strip().lstrip("#") if tag else ""
+
+    batch_tag_counts = {}
+    valid_batch_images_count = 0
 
     for name in all_files:
         if not name.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
             continue
-        if search_lower and search_lower not in name.lower():
-            continue
-            
+        valid_batch_images_count += 1
+
         ann_path = os.path.join(annotations_dir, f"{name}.json")
         has_ann = False
         img_tags = []
@@ -277,10 +286,16 @@ def list_batch_images(project_id: str, batch_id: str, page: int = 1, limit: int 
             try:
                 with open(ann_path, "r", encoding="utf-8") as f:
                     d = json.load(f)
-                    has_ann = len(d.get("annotations", [])) > 0 or d.get("null_labeled", False)
-                    img_tags = d.get("tags", [])
+                    raw_tags = d.get("tags", [])
+                    has_ann = len(d.get("annotations", [])) > 0 or d.get("null_labeled", False) or len(raw_tags) > 0
+                    img_tags = [str(t).strip().lower().lstrip("#") for t in raw_tags if str(t).strip()]
+                    for t in img_tags:
+                        batch_tag_counts[t] = batch_tag_counts.get(t, 0) + 1
             except Exception:
                 pass
+
+        if search_lower and search_lower not in name.lower():
+            continue
 
         if status != "all":
             if status == "labeled" and not has_ann:
@@ -288,10 +303,10 @@ def list_batch_images(project_id: str, batch_id: str, page: int = 1, limit: int 
             if status == "unlabeled" and has_ann:
                 continue
 
-        if tag_lower:
-            if not any(str(t).lower().strip() == tag_lower for t in img_tags):
+        if tag_clean:
+            if not any(t == tag_clean for t in img_tags):
                 continue
-                
+
         matching_files.append(name)
 
     total = len(matching_files)
@@ -315,9 +330,10 @@ def list_batch_images(project_id: str, batch_id: str, page: int = 1, limit: int 
                 with open(ann_path, "r", encoding="utf-8") as f:
                     d = json.load(f)
                     anns = d.get("annotations", [])
-                    has_ann = len(anns) > 0 or d.get("null_labeled", False)
+                    raw_tags = d.get("tags", [])
+                    has_ann = len(anns) > 0 or d.get("null_labeled", False) or len(raw_tags) > 0
                     classes = list(set(a.get("label") for a in anns if a.get("label")))
-                    tags = d.get("tags", [])
+                    tags = [str(t).strip().lstrip("#") for t in raw_tags if str(t).strip()]
             except Exception:
                 pass
         files.append({
@@ -327,7 +343,14 @@ def list_batch_images(project_id: str, batch_id: str, page: int = 1, limit: int 
             "classes": classes,
             "tags": tags,
         })
-    return {"images": files, "total": total, "page": page, "limit": limit}
+    return {
+        "images": files,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "tag_counts": batch_tag_counts,
+        "total_batch_images": valid_batch_images_count
+    }
 
 
 @router.post("/{project_id}/batches/{batch_id}/upload")

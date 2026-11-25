@@ -23,6 +23,9 @@ const state = {
   currentPage: 1,
   limit: 10,
   totalImages: 0,
+  totalBatchImages: 0,
+  batchTagCounts: {},
+
 
   // ── ANNOTATION ────────────────────────────────────────────────────
   annotations: [],

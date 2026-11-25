@@ -316,6 +316,31 @@ function renderProjectsGrid() {
     const card = document.createElement("div");
     card.className = "project-card";
     card.onclick = () => selectProject(p.id, p.name);
+
+    const tagEntries = Object.entries(p.tag_counts || {}).sort((a, b) => b[1] - a[1]);
+    let tagsHtml = "";
+    if (tagEntries.length > 0) {
+      tagsHtml = `
+        <div class="project-tags-section" style="margin-top:10px; padding-top:8px; border-top:1px solid var(--border);">
+          <div style="font-size:11px; font-weight:600; color:var(--text-2); margin-bottom:5px; display:flex; justify-content:space-between; align-items:center;">
+            <span>🏷️ Tags</span>
+            <span style="font-size:10px; color:var(--text-3);">${tagEntries.length} tag${tagEntries.length !== 1 ? 's' : ''}</span>
+          </div>
+          <div style="display:flex; flex-wrap:wrap; gap:4px; max-height:64px; overflow-y:auto; padding-right:2px;">
+            ${tagEntries.map(([t, count]) => `
+              <span class="badge badge-tag" style="font-size:10px; padding:2px 6px; display:inline-flex; align-items:center; gap:4px;">
+                #${escHtml(t)} <strong style="background:rgba(255,255,255,0.18); border-radius:99px; padding:0 4px; color:#fff;">${count}</strong>
+              </span>
+            `).join("")}
+          </div>
+        </div>`;
+    } else {
+      tagsHtml = `
+        <div class="project-tags-section" style="margin-top:10px; padding-top:8px; border-top:1px solid var(--border);">
+          <span style="font-size:11px; color:var(--text-3); font-style:italic;">No tagged images yet</span>
+        </div>`;
+    }
+
     card.innerHTML = `
       <div class="project-card-top">
         <div class="project-icon">🗂️</div>
@@ -337,7 +362,8 @@ function renderProjectsGrid() {
           <span class="project-stat-val" style="color:var(--green)">${p.total_images}</span>
           <span class="project-stat-lbl">Images</span>
         </div>
-      </div>`;
+      </div>
+      ${tagsHtml}`;
     grid.appendChild(card);
   });
 
@@ -419,6 +445,16 @@ function renderBatchGrid() {
     const pct = b.total_images > 0
       ? Math.round(b.labeled_images / b.total_images * 100) : 0;
     const date = b.created_at ? new Date(b.created_at).toLocaleDateString() : "";
+    const bTagEntries = Object.entries(b.tag_counts || {}).sort((x, y) => y[1] - x[1]);
+    let bTagsHtml = "";
+    if (bTagEntries.length > 0) {
+      bTagsHtml = `
+        <div style="display:flex; flex-wrap:wrap; gap:3px; margin-top:8px; max-height:48px; overflow-y:auto;">
+          ${bTagEntries.map(([t, count]) => `
+            <span class="badge badge-tag" style="font-size:9px; padding:1px 5px;">#${escHtml(t)} ${count}</span>
+          `).join("")}
+        </div>`;
+    }
     const card = document.createElement("div");
     card.className = "batch-card";
     card.onclick = () => openBatch(b.id);
@@ -440,7 +476,8 @@ function renderBatchGrid() {
       <div>
         <div class="batch-progress-bar"><div class="batch-progress-fill" style="width:${pct}%"></div></div>
         <div style="font-size:10px;color:var(--text-3);margin-top:3px;">${pct}% annotated</div>
-      </div>`;
+      </div>
+      ${bTagsHtml}`;
     grid.appendChild(card);
   });
 
@@ -1135,6 +1172,8 @@ async function fetchBatchImages(targetIndexAfterLoad = null) {
     const data = await r.json();
     state.images = data.images || [];
     state.totalImages = data.total || 0;
+    state.totalBatchImages = data.total_batch_images || data.total || 0;
+    state.batchTagCounts = data.tag_counts || {};
     
     // Register any classes and tags loaded from the image summaries
     state.images.forEach(img => {
@@ -1144,12 +1183,24 @@ async function fetchBatchImages(targetIndexAfterLoad = null) {
         }
       });
       (img.tags || []).forEach(t => {
-        if (t && !state.projectTags.includes(t)) {
-          state.projectTags.push(t);
+        const ct = strCleanTag(t);
+        if (ct && !state.projectTags.includes(ct)) {
+          state.projectTags.push(ct);
         }
       });
     });
+
     updateImgTagFilterOptions();
+
+    // Update images count badge in sidebar header
+    const countBadge = document.getElementById("imagesCountBadge");
+    if (countBadge) {
+      if (filterTag) {
+        countBadge.innerHTML = `${state.totalImages} <span style="font-size:10px;color:var(--text-3);">(#${escHtml(filterTag)})</span>`;
+      } else {
+        countBadge.textContent = `${state.totalImages}`;
+      }
+    }
   } catch (e) {
     console.error(e);
     state.images = [];
@@ -1277,35 +1328,71 @@ function renderImageList() {
   });
 }
 
+let isImageLoading = false;
+let currentLoadingImgFilename = null;
+
+function strCleanTag(t) {
+  return String(t || "").trim().toLowerCase().replace(/^#/, "");
+}
+
 async function loadImage(idx) {
   if (idx < 0 || idx >= state.images.length) return;
-  if (state.currentImageIndex !== -1) await saveAnnotations(false);
-
-  state.currentImageIndex = idx;
   const img = state.images[idx];
-  
-  // Clear previous canvas state to prevent cross-contamination during loading
+  if (!img) return;
+
+  // If already loaded on this image and not currently fetching, do not reload
+  if (state.currentImageIndex === idx && currentLoadingImgFilename === img.filename && !isImageLoading) {
+    return;
+  }
+
+  // Save previous image annotations if valid
+  if (state.currentImageIndex !== -1 && !isImageLoading) {
+    await saveAnnotations(false);
+  }
+
+  isImageLoading = true;
+  state.currentImageIndex = idx;
+  currentLoadingImgFilename = img.filename;
+
+  // Pre-seed tags from state.images[idx] immediately so tags appear without waiting
+  state.currentImageTags = (img.tags || []).map(t => strCleanTag(t)).filter(Boolean);
   state.annotations = [];
-  imgObj = null;
   state.nullLabeled = false;
-  state.currentImageTags = [];
-  state.tempPoints = []; 
+  state.tempPoints = [];
   state.selected = null;
+  imgObj = null;
   if (typeof ctx !== "undefined" && ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+  // Render immediately for responsive UI
   renderImageList();
+  renderTagList();
+
   const counter = document.getElementById("imgCounter");
   const dimInfo = document.getElementById("imgDimInfo");
-  if (counter) counter.textContent = `${idx + 1} / ${state.images.length}`;
+  if (counter) {
+    const globalIdx = (state.currentPage - 1) * state.limit + idx + 1;
+    counter.textContent = `${globalIdx} / ${state.totalImages || state.images.length}`;
+  }
   if (dimInfo) dimInfo.textContent = "Loading…";
 
   try {
     const r = await fetch(`${API}/batches/${state.projectId}/batches/${state.activeBatchId}/annotations/${encodeURIComponent(img.filename)}`);
+    if (currentLoadingImgFilename !== img.filename) {
+      return; // Navigation happened, discard this fetch
+    }
     const d = await r.json();
     state.annotations = d.annotations || [];
     state.nullLabeled = d.null_labeled || false;
-    state.currentImageTags = d.tags || [];
-    
+    state.currentImageTags = (d.tags || []).map(t => strCleanTag(t)).filter(Boolean);
+
+    // Update in local state.images[idx]
+    if (state.images[idx] && state.images[idx].filename === img.filename) {
+      state.images[idx].tags = [...state.currentImageTags];
+      state.images[idx].annotated = (state.annotations.length > 0 || state.nullLabeled || state.currentImageTags.length > 0);
+      state.images[idx].null_labeled = state.nullLabeled || false;
+      state.images[idx].classes = [...new Set(state.annotations.map(a => a.label).filter(Boolean))];
+    }
+
     // Register any loaded annotation classes
     state.annotations.forEach(ann => {
       if (ann.label && !state.classes.includes(ann.label)) {
@@ -1313,52 +1400,72 @@ async function loadImage(idx) {
       }
     });
 
-    // Register any loaded tags
+    // Register any loaded tags to projectTags
     state.currentImageTags.forEach(t => {
       if (t && !state.projectTags.includes(t)) {
         state.projectTags.push(t);
       }
     });
-  } catch { 
-    state.annotations = []; 
-    state.nullLabeled = false;
-    state.currentImageTags = [];
+  } catch (err) {
+    console.error("Failed to load annotations:", err);
+    if (currentLoadingImgFilename !== img.filename) return;
+  } finally {
+    if (currentLoadingImgFilename === img.filename) {
+      isImageLoading = false;
+    }
   }
 
+  // Update annotation UI right away!
   updateNullLabelButton();
+  renderTagList();
+  renderClassList();
+  renderAnnotationList();
+  renderImageList();
 
   const el = new Image();
   el.onload = () => {
+    if (currentLoadingImgFilename !== img.filename) return;
     imgObj = el;
     fitImage();
     if (dimInfo) dimInfo.textContent = `${el.naturalWidth}×${el.naturalHeight} · ${img.filename}`;
-    renderClassList(); renderAnnotationList(); renderTagList(); draw();
+    draw();
+  };
+  el.onerror = () => {
+    if (dimInfo) dimInfo.textContent = `Failed to load image · ${img.filename}`;
   };
   el.src = `${API}${img.url}`;
 }
 
 async function saveAnnotations(notify = false) {
-  if (state.currentImageIndex === -1 || !state.activeBatchId) return;
-  const img = state.images[state.currentImageIndex];
-  
-  // Send save payload to backend
-  await fetch(`${API}/batches/${state.projectId}/batches/${state.activeBatchId}/annotations`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ 
-      image: img.filename, 
-      annotations: state.annotations,
-      null_labeled: state.nullLabeled || false,
-      tags: state.currentImageTags || []
-    }),
-  });
-  
-  // Update local image state status
-  state.images[state.currentImageIndex].annotated = (state.annotations.length > 0 || state.nullLabeled);
-  state.images[state.currentImageIndex].null_labeled = state.nullLabeled || false;
-  state.images[state.currentImageIndex].classes = [...new Set(state.annotations.map(a => a.label).filter(Boolean))];
-  state.images[state.currentImageIndex].tags = [...(state.currentImageTags || [])];
-  
-  renderImageList();
+  if (state.currentImageIndex === -1 || !state.activeBatchId || isImageLoading) return;
+  const targetIdx = state.currentImageIndex;
+  const img = state.images[targetIdx];
+  if (!img) return;
+
+  const payload = {
+    image: img.filename,
+    annotations: state.annotations,
+    null_labeled: state.nullLabeled || false,
+    tags: (state.currentImageTags || []).map(t => strCleanTag(t)).filter(Boolean)
+  };
+
+  try {
+    await fetch(`${API}/batches/${state.projectId}/batches/${state.activeBatchId}/annotations`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    // Update local image state status safely
+    if (state.images[targetIdx] && state.images[targetIdx].filename === img.filename) {
+      state.images[targetIdx].annotated = (payload.annotations.length > 0 || payload.null_labeled || payload.tags.length > 0);
+      state.images[targetIdx].null_labeled = payload.null_labeled;
+      state.images[targetIdx].classes = [...new Set(payload.annotations.map(a => a.label).filter(Boolean))];
+      state.images[targetIdx].tags = [...payload.tags];
+    }
+    renderImageList();
+  } catch (err) {
+    console.error("Failed to save annotations:", err);
+  }
 }
 
 function toggleNullLabel() {
@@ -1548,12 +1655,26 @@ function renderClassList() {
 function updateImgTagFilterOptions() {
   const el = document.getElementById("imgTagFilter");
   if (!el) return;
-  const currentVal = el.value;
-  let options = '<option value="">All Tags</option>';
-  (state.projectTags || []).forEach(t => {
-    options += `<option value="${escHtml(t)}" ${t === currentVal ? "selected" : ""}>#${escHtml(t)}</option>`;
+  const currentVal = el.value ? strCleanTag(el.value) : "";
+  const counts = state.batchTagCounts || {};
+
+  // Collect all unique tags
+  const allTagKeys = new Set([
+    ...Object.keys(counts),
+    ...(state.projectTags || []).map(t => strCleanTag(t))
+  ]);
+  const sortedTags = Array.from(allTagKeys).filter(Boolean).sort();
+
+  let options = `<option value="">All Tags (${state.totalBatchImages || state.totalImages || 0})</option>`;
+  sortedTags.forEach(t => {
+    const c = counts[t] || 0;
+    const isSelected = (t === currentVal);
+    options += `<option value="${escHtml(t)}" ${isSelected ? "selected" : ""}>#${escHtml(t)} (${c})</option>`;
   });
   el.innerHTML = options;
+  if (currentVal && sortedTags.includes(currentVal)) {
+    el.value = currentVal;
+  }
 }
 
 function renderTagList() {
@@ -1564,7 +1685,7 @@ function renderTagList() {
 
   if (!listEl) return;
 
-  const currentTags = state.currentImageTags || [];
+  const currentTags = (state.currentImageTags || []).map(t => strCleanTag(t)).filter(Boolean);
   if (countBadge) {
     countBadge.textContent = `${currentTags.length} tag${currentTags.length !== 1 ? "s" : ""}`;
   }
@@ -1583,12 +1704,20 @@ function renderTagList() {
 
   // Populate datalist for autocomplete
   if (datalist) {
-    datalist.innerHTML = (state.projectTags || []).map(t => `<option value="${escHtml(t)}"></option>`).join("");
+    const allTags = Array.from(new Set([
+      ...(state.projectTags || []).map(t => strCleanTag(t)),
+      ...Object.keys(state.batchTagCounts || {})
+    ])).filter(Boolean).sort();
+    datalist.innerHTML = allTags.map(t => `<option value="${escHtml(t)}"></option>`).join("");
   }
 
   // Populate quick suggestions (project tags not yet applied to this image)
   if (suggEl) {
-    const unused = (state.projectTags || []).filter(t => !currentTags.includes(t));
+    const allTags = Array.from(new Set([
+      ...(state.projectTags || []).map(t => strCleanTag(t)),
+      ...Object.keys(state.batchTagCounts || {})
+    ])).filter(Boolean).sort();
+    const unused = allTags.filter(t => !currentTags.includes(t));
     if (unused.length > 0) {
       suggEl.innerHTML = `
         <span style="font-size:10px;color:var(--text-3);width:100%;margin-bottom:2px;">Quick add:</span>
@@ -1604,8 +1733,8 @@ function renderTagList() {
 }
 
 async function addTag(tag) {
-  if (state.currentImageIndex === -1) return;
-  const cleaned = tag.trim().toLowerCase();
+  if (state.currentImageIndex === -1 || isImageLoading) return;
+  const cleaned = strCleanTag(tag);
   if (!cleaned) return;
 
   if (!state.currentImageTags) state.currentImageTags = [];
@@ -1613,38 +1742,67 @@ async function addTag(tag) {
     state.currentImageTags.push(cleaned);
   }
 
+  // Update image in state.images immediately!
+  if (state.images[state.currentImageIndex]) {
+    state.images[state.currentImageIndex].tags = [...state.currentImageTags];
+    state.images[state.currentImageIndex].annotated = true;
+  }
+
   if (!state.projectTags) state.projectTags = [];
   if (!state.projectTags.includes(cleaned)) {
     state.projectTags.push(cleaned);
-    if (state.projectId) {
-      fetch(`${API}/projects/${state.projectId}/tags`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tag: cleaned })
-      }).catch(console.error);
-    }
   }
 
+  // Update batch tag counts locally immediately!
+  if (!state.batchTagCounts) state.batchTagCounts = {};
+  state.batchTagCounts[cleaned] = (state.batchTagCounts[cleaned] || 0) + 1;
+
   renderTagList();
+  renderImageList();
+  updateImgTagFilterOptions();
+
   await saveAnnotations(false);
+
+  if (state.projectId) {
+    fetch(`${API}/projects/${state.projectId}/tags`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tag: cleaned })
+    }).catch(console.error);
+  }
 }
 
 async function removeTag(tag) {
-  if (state.currentImageIndex === -1 || !state.currentImageTags) return;
-  state.currentImageTags = state.currentImageTags.filter(t => t !== tag);
+  if (state.currentImageIndex === -1 || !state.currentImageTags || isImageLoading) return;
+  const cleaned = strCleanTag(tag);
+  state.currentImageTags = state.currentImageTags.filter(t => t !== cleaned);
+
+  if (state.images[state.currentImageIndex]) {
+    state.images[state.currentImageIndex].tags = [...state.currentImageTags];
+    state.images[state.currentImageIndex].annotated = (state.annotations.length > 0 || state.nullLabeled || state.currentImageTags.length > 0);
+  }
+
+  if (state.batchTagCounts && state.batchTagCounts[cleaned] > 0) {
+    state.batchTagCounts[cleaned]--;
+  }
+
   renderTagList();
+  renderImageList();
+  updateImgTagFilterOptions();
   await saveAnnotations(false);
 }
 
-function handleAddTag() {
+async function handleAddTag() {
   const inp = document.getElementById("newTagInput");
   if (!inp) return;
   const val = inp.value.trim();
   if (!val) return;
 
-  const tags = val.split(",").map(t => t.trim()).filter(Boolean);
-  tags.forEach(t => addTag(t));
+  const tags = val.split(",").map(t => strCleanTag(t)).filter(Boolean);
   inp.value = "";
+  for (const t of tags) {
+    await addTag(t);
+  }
 }
 
 // ════════════════════════════════════════════════════════════════════

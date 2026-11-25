@@ -49,24 +49,42 @@ def list_projects():
             continue
         meta = get_project_meta(pid)
         
-        # Calculate some stats for the project
+        # Calculate stats for the project
         batches_dir = os.path.join(project_dir, "batches")
         num_batches = 0
         total_images = 0
+        tag_counts = {}
         if os.path.exists(batches_dir):
             for bid in os.listdir(batches_dir):
-                if os.path.isdir(os.path.join(batches_dir, bid)):
+                batch_path = os.path.join(batches_dir, bid)
+                if os.path.isdir(batch_path):
                     num_batches += 1
-                    img_dir = os.path.join(batches_dir, bid, "images")
+                    img_dir = os.path.join(batch_path, "images")
+                    ann_dir = os.path.join(batch_path, "annotations")
                     if os.path.exists(img_dir):
-                        total_images += len([f for f in os.listdir(img_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.webp'))])
+                        img_names = [f for f in os.listdir(img_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.webp'))]
+                        total_images += len(img_names)
+                        if os.path.exists(ann_dir):
+                            for fn in img_names:
+                                ann_p = os.path.join(ann_dir, f"{fn}.json")
+                                if os.path.exists(ann_p):
+                                    try:
+                                        with open(ann_p, "r", encoding="utf-8") as jf:
+                                            d = json.load(jf)
+                                            for t in d.get("tags", []):
+                                                t_clean = str(t).strip().lower().lstrip("#")
+                                                if t_clean:
+                                                    tag_counts[t_clean] = tag_counts.get(t_clean, 0) + 1
+                                    except Exception:
+                                        pass
                         
         projects.append({
             "id": pid,
             "name": meta.get("name", pid),
             "created_at": meta.get("created_at", ""),
             "num_batches": num_batches,
-            "total_images": total_images
+            "total_images": total_images,
+            "tag_counts": tag_counts
         })
     projects.sort(key=lambda x: x["created_at"], reverse=True)
     return projects

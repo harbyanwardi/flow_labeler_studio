@@ -108,7 +108,10 @@
 
           <div class="sidebar-section">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-              <span class="sidebar-section-title">Images in Batch</span>
+              <div style="display:flex;align-items:center;gap:6px;">
+                <span class="sidebar-section-title" style="margin:0;">Images</span>
+                <span id="imagesCountBadge" style="font-size:11px;color:var(--accent-hi);font-weight:600;">0</span>
+              </div>
               <div id="paginationControls" style="display:none;gap:6px;align-items:center;font-size:12px;">
                 <button class="btn" style="padding:2px 8px;font-size:11px;min-height:unset;" onclick="changePage(-1)">&lt;</button>
                 <span id="pageInfo" style="color:var(--text-2);font-weight:500;">1/1</span>
@@ -547,8 +550,8 @@
   </div>
 
   <!-- SCRIPTS -->
-  <script src="static/state.js?v=4"></script>
-  <script src="static/canvas.js?v=4"></script>
+  <script src="static/state.js?v=5"></script>
+  <script src="static/canvas.js?v=5"></script>
 </body>
 
 </html>
