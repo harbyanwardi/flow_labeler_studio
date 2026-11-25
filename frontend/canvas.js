@@ -2,8 +2,8 @@
 // ────────────────────────────────────────────────────────────────────
 "use strict";
 
-const BASE_PATH = window.location.pathname.endsWith('/') 
-  ? window.location.pathname.slice(0, -1) 
+const BASE_PATH = window.location.pathname.endsWith('/')
+  ? window.location.pathname.slice(0, -1)
   : window.location.pathname;
 const API = window.location.origin + BASE_PATH;
 
@@ -51,10 +51,10 @@ function loadProjectClasses() {
     state.classColors = JSON.parse(savedColors);
   } else {
     state.classColors = {
-      defect:  "#ef4444",
-      crack:   "#3b82f6",
+      defect: "#ef4444",
+      crack: "#3b82f6",
       scratch: "#10b981",
-      burn:    "#f59e0b",
+      burn: "#f59e0b",
     };
   }
 }
@@ -204,9 +204,9 @@ function showScreen(name) {
   // Hide all screens first
   const screens = [
     { id: "projectsScreen", type: "flex" },
-    { id: "homeScreen",     type: "flex" },
+    { id: "homeScreen", type: "flex" },
     { id: "annotateScreen", type: "flex" },
-    { id: "versionScreen",  type: "flex" },
+    { id: "versionScreen", type: "flex" },
   ];
   screens.forEach(({ id }) => {
     const el = document.getElementById(id);
@@ -216,9 +216,9 @@ function showScreen(name) {
   // Show target screen
   const target = screens.find(s =>
     (name === "projects" && s.id === "projectsScreen") ||
-    (name === "home"     && s.id === "homeScreen")     ||
+    (name === "home" && s.id === "homeScreen") ||
     (name === "annotate" && s.id === "annotateScreen") ||
-    (name === "version"  && s.id === "versionScreen")
+    (name === "version" && s.id === "versionScreen")
   );
   if (target) {
     const el = document.getElementById(target.id);
@@ -631,14 +631,20 @@ async function createDataset() {
   const inp = document.getElementById("newDatasetName");
   const name = inp ? inp.value.trim() : "";
   if (!name) { alert("Enter a dataset name."); return; }
-  await fetch(`${API}/datasets/${state.projectId}/datasets/create`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
-  });
-  closeModal("newDatasetModal");
-  await fetchHome();
-  // if called from inside add-to-dataset modal, refresh its list too
-  renderAddToDsDatasetList();
+  try {
+    const res = await fetch(`${API}/datasets/${state.projectId}/datasets/create`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    const newDs = await res.json();
+    closeModal("newDatasetModal");
+    await fetchHome();
+    // if called from inside add-to-dataset modal, auto-select the new dataset & version
+    const newVid = (newDs.versions && newDs.versions.length) ? newDs.versions[0].id : null;
+    await loadDatasetsForAddToModal(newDs.id, newVid);
+  } catch (err) {
+    alert("Failed to create dataset: " + err.message);
+  }
 }
 async function deleteDataset(id) {
   if (!confirm("Delete this dataset and all its versions?")) return;
@@ -656,6 +662,13 @@ async function createVersion(datasetId) {
 async function openVersionView(datasetId, versionId) {
   state.activeDatasetId = datasetId;
   state.activeVersionId = versionId;
+  state.versionCurrentPage = 1;
+  state.versionSearch = "";
+  state.versionTagFilter = "";
+  const sInp = document.getElementById("versionImgSearch");
+  if (sInp) sInp.value = "";
+  const tSel = document.getElementById("versionImgTagFilter");
+  if (tSel) tSel.value = "";
   showScreen("version");
   await refreshVersionView();
 }
@@ -689,25 +702,153 @@ async function refreshVersionView() {
     statStatus.style.color = ver.status === "exported" ? "var(--green)" : "var(--amber)";
   }
 
-  // load images
-  const imgRes = await fetch(`${API}/datasets/${state.projectId}/datasets/${dsId}/versions/${verId}/images`);
-  state.versionImages = await imgRes.json();
   state.versionMeta = ver;
-
-  renderVersionImgGrid();
   renderExportLog(exports);
   renderTopbar();
+
+  await fetchVersionImages();
+}
+
+let versionSearchTimeout = null;
+function handleVersionSearchInput() {
+  clearTimeout(versionSearchTimeout);
+  versionSearchTimeout = setTimeout(() => {
+    const sInp = document.getElementById("versionImgSearch");
+    state.versionSearch = sInp ? sInp.value.trim() : "";
+    state.versionCurrentPage = 1;
+    fetchVersionImages();
+  }, 300);
+}
+
+function handleVersionTagFilterChange() {
+  const tSel = document.getElementById("versionImgTagFilter");
+  state.versionTagFilter = tSel ? tSel.value : "";
+  state.versionCurrentPage = 1;
+  fetchVersionImages();
+}
+
+function changeVersionPage(delta) {
+  const maxPage = Math.ceil(state.versionTotalImages / state.versionLimit) || 1;
+  const newPage = state.versionCurrentPage + delta;
+  if (newPage < 1 || newPage > maxPage) return;
+  state.versionCurrentPage = newPage;
+  fetchVersionImages();
+}
+
+function changeVersionLimit(newLimit) {
+  state.versionLimit = parseInt(newLimit, 10) || 24;
+  state.versionCurrentPage = 1;
+  fetchVersionImages();
+}
+
+function showVersionLoader(text = "Loading images...", progress = "Please wait until all thumbnails are loaded") {
+  const loader = document.getElementById("versionGridLoader");
+  const textEl = document.getElementById("versionLoaderText");
+  const progEl = document.getElementById("versionLoaderProgress");
+  if (textEl) textEl.textContent = text;
+  if (progEl) progEl.textContent = progress;
+  if (loader) {
+    loader.style.display = "flex";
+    loader.style.opacity = "1";
+  }
+}
+
+function updateVersionLoaderProgress(text, progress) {
+  const textEl = document.getElementById("versionLoaderText");
+  const progEl = document.getElementById("versionLoaderProgress");
+  if (textEl && text) textEl.textContent = text;
+  if (progEl && progress) progEl.textContent = progress;
+}
+
+function hideVersionLoader() {
+  const loader = document.getElementById("versionGridLoader");
+  if (loader) {
+    loader.style.transition = "opacity 0.2s ease";
+    loader.style.opacity = "0";
+    setTimeout(() => {
+      if (loader.style.opacity === "0") loader.style.display = "none";
+    }, 200);
+  }
+}
+
+let versionImgLoadSafetyTimeout = null;
+
+async function fetchVersionImages() {
+  const dsId = state.activeDatasetId;
+  const verId = state.activeVersionId;
+  if (!dsId || !verId) return;
+
+  showVersionLoader("Fetching images from server...", "Loading dataset page...");
+
+  try {
+    const page = state.versionCurrentPage || 1;
+    const limit = state.versionLimit || 24;
+    const query = encodeURIComponent(state.versionSearch || "");
+    const tag = encodeURIComponent(state.versionTagFilter || "");
+
+    const imgRes = await fetch(`${API}/datasets/${state.projectId}/datasets/${dsId}/versions/${verId}/images?page=${page}&limit=${limit}&search=${query}&tag=${tag}`);
+    const data = await imgRes.json();
+
+    if (Array.isArray(data)) {
+      state.versionImages = data;
+      state.versionTotalImages = data.length;
+      state.versionTagCounts = {};
+    } else {
+      state.versionImages = data.images || [];
+      state.versionTotalImages = data.total || 0;
+      state.versionTagCounts = data.tag_counts || {};
+    }
+
+    updateVersionPaginationUI();
+    updateVersionTagFilterOptions();
+    renderVersionImgGrid();
+  } catch (err) {
+    console.error("Failed to load version images:", err);
+    hideVersionLoader();
+    const grid = document.getElementById("versionImgGrid");
+    if (grid) {
+      grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1;color:var(--danger);"><div class="empty-icon">⚠️</div>Failed to load images: ${escHtml(err.message)}</div>`;
+    }
+  }
 }
 
 function renderVersionImgGrid() {
   const grid = document.getElementById("versionImgGrid");
-  if (!grid) return;
+  if (!grid) {
+    hideVersionLoader();
+    return;
+  }
   grid.innerHTML = "";
 
   if (!state.versionImages.length) {
-    grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1;"><div class="empty-icon">🖼️</div>No images added yet.<br>Go to a batch and click "Add to Dataset".</div>`;
+    hideVersionLoader();
+    grid.innerHTML = `
+      <div class="empty-state" style="grid-column:1/-1;">
+        <div class="empty-icon">🖼️</div>
+        ${state.versionSearch || state.versionTagFilter ? "No images match the search / tag filter." : "No images added yet.<br>Go to a batch and click \"Add to Dataset\"."}
+      </div>`;
     return;
   }
+
+  const totalToLoad = state.versionImages.length;
+  let loadedCount = 0;
+
+  updateVersionLoaderProgress(`Loading image thumbnails (0 / ${totalToLoad})...`, "Rendering thumbnails on screen");
+
+  const onImageFinished = () => {
+    loadedCount++;
+    updateVersionLoaderProgress(`Loading image thumbnails (${loadedCount} / ${totalToLoad})...`, `Loaded ${loadedCount} of ${totalToLoad} thumbnails`);
+    if (loadedCount >= totalToLoad) {
+      if (versionImgLoadSafetyTimeout) clearTimeout(versionImgLoadSafetyTimeout);
+      hideVersionLoader();
+    }
+  };
+
+  // Safety fallback timeout: if an image fails to complete in 6 seconds, hide loader anyway
+  if (versionImgLoadSafetyTimeout) clearTimeout(versionImgLoadSafetyTimeout);
+  versionImgLoadSafetyTimeout = setTimeout(() => {
+    hideVersionLoader();
+  }, 6000);
 
   state.versionImages.forEach(img => {
     const card = document.createElement("div");
@@ -718,16 +859,85 @@ function renderVersionImgGrid() {
         ${img.tags.map(t => `<span class="badge badge-tag">#${escHtml(t)}</span>`).join('')}
       </div>
     ` : '';
-    card.innerHTML = `
-      <img class="version-img-thumb" src="${API}${img.url}" alt="${escHtml(img.filename)}" loading="lazy">
-      <div class="version-img-info">
-        <div class="version-img-filename">${escHtml(img.filename)}</div>
-        <div class="version-img-src">📦 ${escHtml(batchName)}</div>
-        ${tagsHtml}
-      </div>
-      <button class="version-img-rm" title="Remove from version" onclick="removeVersionImage('${img.id}')">✕</button>`;
+
+    const imgEl = document.createElement("img");
+    imgEl.className = "version-img-thumb";
+    imgEl.alt = img.filename;
+    imgEl.src = `${API}${img.url}`;
+
+    if (imgEl.complete) {
+      onImageFinished();
+    } else {
+      imgEl.onload = onImageFinished;
+      imgEl.onerror = () => {
+        imgEl.src = "/static/placeholder.png";
+        onImageFinished();
+      };
+    }
+
+    const infoEl = document.createElement("div");
+    infoEl.className = "version-img-info";
+    infoEl.innerHTML = `
+      <div class="version-img-filename" title="${escHtml(img.filename)}">${escHtml(img.filename)}</div>
+      <div class="version-img-src">📦 ${escHtml(batchName)}</div>
+      ${tagsHtml}
+    `;
+
+    const rmBtn = document.createElement("button");
+    rmBtn.className = "version-img-rm";
+    rmBtn.title = "Remove from version";
+    rmBtn.innerHTML = "✕";
+    rmBtn.onclick = (e) => {
+      e.stopPropagation();
+      removeVersionImage(img.id);
+    };
+
+    card.appendChild(imgEl);
+    card.appendChild(infoEl);
+    card.appendChild(rmBtn);
     grid.appendChild(card);
   });
+}
+
+function updateVersionPaginationUI() {
+  const page = state.versionCurrentPage || 1;
+  const limit = state.versionLimit || 24;
+  const total = state.versionTotalImages || 0;
+  const maxPage = Math.ceil(total / limit) || 1;
+
+  const pageInfoEl = document.getElementById("versionPageInfo");
+  const prevBtn = document.getElementById("versionPrevBtn");
+  const nextBtn = document.getElementById("versionNextBtn");
+
+  if (pageInfoEl) {
+    if (total === 0) {
+      pageInfoEl.textContent = "0 images";
+    } else {
+      const startIdx = (page - 1) * limit + 1;
+      const endIdx = Math.min(page * limit, total);
+      pageInfoEl.textContent = `${startIdx}-${endIdx} of ${total} images (Page ${page}/${maxPage})`;
+    }
+  }
+
+  if (prevBtn) prevBtn.disabled = (page <= 1);
+  if (nextBtn) nextBtn.disabled = (page >= maxPage);
+}
+
+function updateVersionTagFilterOptions() {
+  const tagSel = document.getElementById("versionImgTagFilter");
+  if (!tagSel) return;
+
+  const currentVal = state.versionTagFilter || "";
+  let html = `<option value="">All Tags</option>`;
+
+  const entries = Object.entries(state.versionTagCounts || {}).sort((a, b) => b[1] - a[1]);
+  entries.forEach(([t, count]) => {
+    html += `<option value="${escHtml(t)}" ${currentVal === t ? "selected" : ""}>#${escHtml(t)} (${count})</option>`;
+  });
+
+  html += `<option value="__notag__" ${currentVal === "__notag__" ? "selected" : ""}>No Tag</option>`;
+
+  tagSel.innerHTML = html;
 }
 
 function renderExportLog(exports) {
@@ -765,7 +975,16 @@ function renderExportLog(exports) {
 async function removeVersionImage(refId) {
   if (!confirm("Remove this image from the version?")) return;
   await fetch(`${API}/datasets/${state.projectId}/datasets/${state.activeDatasetId}/versions/${state.activeVersionId}/images/${refId}`, { method: "DELETE" });
-  refreshVersionView();
+  await fetchHome();
+  const ds = state.datasets.find(d => d.id === state.activeDatasetId) || {};
+  const ver = (ds.versions || []).find(v => v.id === state.activeVersionId) || {};
+  const statImages = document.getElementById("vstatImages");
+  if (statImages) statImages.textContent = ver.image_count || 0;
+  const maxPage = Math.ceil((ver.image_count || 0) / (state.versionLimit || 24)) || 1;
+  if (state.versionCurrentPage > maxPage) {
+    state.versionCurrentPage = maxPage;
+  }
+  await fetchVersionImages();
 }
 
 function getBatchName(batchId) {
@@ -776,75 +995,317 @@ function getBatchName(batchId) {
 // ════════════════════════════════════════════════════════════════════
 // ADD TO DATASET MODAL
 // ════════════════════════════════════════════════════════════════════
-function openAddToDatasetModal() {
+async function openAddToDatasetModal() {
   if (state.currentImageIndex !== -1) saveAnnotations(false);
-  addToDsCtx = { selectedDatasetId: null, selectedVersionId: null };
-  renderAddToDsDatasetList();
-  renderAddImgList();
-  const summary = document.getElementById("addImgSummary");
-  if (summary) summary.textContent = "";
+  addToDsCtx.filterTag = "";
+
+  const selectAll = document.getElementById("selectAllAddImages");
+  if (selectAll) selectAll.checked = true;
+  const labelEl = document.getElementById("selectAllAddImagesLabel");
+  if (labelEl) labelEl.textContent = "All";
+
   openModal("addToDatasetModal");
+
+  const summary = document.getElementById("addImgSummary");
+  if (summary) summary.innerHTML = `<span style="color:var(--text-3);"><span class="spinner"></span> Loading datasets and images...</span>`;
+
+  await Promise.all([
+    loadDatasetsForAddToModal(),
+    loadBatchImagesForAddToModal()
+  ]);
 }
 
+// Backwards-compatibility alias
 function renderAddToDsDatasetList() {
-  const el = document.getElementById("addToDsDatasetList");
-  if (!el) return;
-  el.innerHTML = "";
+  loadDatasetsForAddToModal();
+}
 
-  if (!state.datasets.length) {
-    el.innerHTML = `<div style="font-size:12px;color:var(--text-3);padding:8px 0;">No datasets yet. Create one below.</div>`;
+async function loadDatasetsForAddToModal(preferredDatasetId = null, preferredVersionId = null) {
+  const dsSelect = document.getElementById("addToDsDatasetSelect");
+  const verSelect = document.getElementById("addToDsVersionSelect");
+  const verInfo = document.getElementById("addToDsVersionInfo");
+  const newVerBtn = document.getElementById("addToDsNewVerBtn");
+
+  if (dsSelect) {
+    dsSelect.innerHTML = `<option value="">Loading datasets...</option>`;
+    dsSelect.disabled = true;
+  }
+  if (verSelect) {
+    verSelect.innerHTML = `<option value="">--</option>`;
+    verSelect.disabled = true;
+  }
+
+  try {
+    const res = await fetch(`${API}/datasets/${state.projectId}/datasets/list`);
+    if (res.ok) {
+      state.datasets = await res.json();
+    }
+  } catch (err) {
+    console.error("Failed to load datasets:", err);
+  }
+
+  if (!state.datasets || !state.datasets.length) {
+    if (dsSelect) {
+      dsSelect.innerHTML = `<option value="">No datasets found. Create one first.</option>`;
+      dsSelect.disabled = true;
+    }
+    if (verSelect) {
+      verSelect.innerHTML = `<option value="">No versions available</option>`;
+      verSelect.disabled = true;
+    }
+    if (newVerBtn) newVerBtn.style.display = "none";
+    if (verInfo) verInfo.innerHTML = `<span style="color:var(--text-3);">Click "+ Create New Dataset" above to create your first dataset.</span>`;
+    addToDsCtx.selectedDatasetId = null;
+    addToDsCtx.selectedVersionId = null;
     return;
   }
 
+  if (dsSelect) dsSelect.disabled = false;
+
+  let dsHtml = `<option value="">-- Choose Dataset --</option>`;
   state.datasets.forEach(ds => {
-    const draftVersions = (ds.versions || []).filter(v => true); // show all versions
-    const wrapper = document.createElement("div");
-    wrapper.style.cssText = "border:1px solid var(--border);border-radius:8px;overflow:hidden;";
-
-    const dsRow = document.createElement("div");
-    dsRow.style.cssText = "padding:8px 12px;background:var(--bg-2);font-size:12px;font-weight:600;color:var(--text-2);";
-    dsRow.textContent = `🗂 ${ds.name}`;
-    wrapper.appendChild(dsRow);
-
-    draftVersions.forEach(ver => {
-      const row = document.createElement("div");
-      const isSelected = addToDsCtx.selectedDatasetId === ds.id && addToDsCtx.selectedVersionId === ver.id;
-      row.className = `dataset-select-card${isSelected ? " selected" : ""}`;
-      row.style.cssText = "border-radius:0;border-left:none;border-right:none;border-top:none;";
-      row.innerHTML = `
-        <div style="display:flex;align-items:center;gap:8px;">
-          <span style="font-size:11px;font-weight:700;padding:2px 7px;border-radius:4px;background:rgba(59,130,246,.12);color:var(--accent-hi);">${escHtml(ver.name)}</span>
-          <span style="font-size:11px;color:var(--text-3);">${ver.image_count || 0} images · ${ver.status}</span>
-        </div>
-        ${isSelected ? '<span style="color:var(--accent);font-size:14px;">✓</span>' : ""}`;
-      row.onclick = () => {
-        addToDsCtx.selectedDatasetId = ds.id;
-        addToDsCtx.selectedVersionId = ver.id;
-        renderAddToDsDatasetList();
-      };
-      wrapper.appendChild(row);
-    });
-    el.appendChild(wrapper);
+    const vCount = (ds.versions || []).length;
+    dsHtml += `<option value="${escHtml(ds.id)}">${escHtml(ds.name)} (${vCount} ver)</option>`;
   });
+  if (dsSelect) dsSelect.innerHTML = dsHtml;
+
+  let targetDsId = preferredDatasetId || addToDsCtx.selectedDatasetId;
+  let targetDs = state.datasets.find(d => d.id === targetDsId);
+  if (!targetDs && state.datasets.length > 0) {
+    targetDs = state.datasets[0];
+    targetDsId = targetDs.id;
+  }
+
+  if (targetDs && dsSelect) {
+    dsSelect.value = targetDsId;
+    addToDsCtx.selectedDatasetId = targetDsId;
+    populateVersionsForSelectedDataset(targetDs, preferredVersionId);
+  }
 }
 
-function renderAddImgList() {
+function populateVersionsForSelectedDataset(targetDs, preferredVersionId = null) {
+  const verSelect = document.getElementById("addToDsVersionSelect");
+  const verInfo = document.getElementById("addToDsVersionInfo");
+  const newVerBtn = document.getElementById("addToDsNewVerBtn");
+
+  if (!targetDs) {
+    if (verSelect) {
+      verSelect.innerHTML = `<option value="">Select a dataset first</option>`;
+      verSelect.disabled = true;
+    }
+    if (newVerBtn) newVerBtn.style.display = "none";
+    if (verInfo) verInfo.innerHTML = "";
+    addToDsCtx.selectedVersionId = null;
+    return;
+  }
+
+  const versions = targetDs.versions || [];
+  if (newVerBtn) newVerBtn.style.display = "inline-block";
+
+  if (!versions.length) {
+    if (verSelect) {
+      verSelect.innerHTML = `<option value="">No versions (click + New Version)</option>`;
+      verSelect.disabled = true;
+    }
+    if (verInfo) verInfo.innerHTML = `<span style="color:var(--warning, #f59e0b);">No versions in this dataset. Click "+ New Version" to create one.</span>`;
+    addToDsCtx.selectedVersionId = null;
+    return;
+  }
+
+  if (verSelect) verSelect.disabled = false;
+
+  let verHtml = "";
+  versions.forEach(v => {
+    verHtml += `<option value="${escHtml(v.id)}">${escHtml(v.name)} (${v.image_count || 0} images · ${v.status})</option>`;
+  });
+  if (verSelect) verSelect.innerHTML = verHtml;
+
+  let targetVerId = preferredVersionId || addToDsCtx.selectedVersionId;
+  let targetVer = versions.find(v => v.id === targetVerId);
+  if (!targetVer) {
+    targetVer = versions.find(v => v.status === "draft") || versions[0];
+    targetVerId = targetVer ? targetVer.id : null;
+  }
+
+  if (targetVer && verSelect) {
+    verSelect.value = targetVerId;
+    addToDsCtx.selectedVersionId = targetVerId;
+  }
+
+  updateAddToDsVersionInfo(targetDs, targetVer);
+}
+
+function updateAddToDsVersionInfo(ds, ver) {
+  const verInfo = document.getElementById("addToDsVersionInfo");
+  if (!verInfo) return;
+  if (!ds || !ver) {
+    verInfo.innerHTML = "";
+    return;
+  }
+  const isExported = ver.status === "exported";
+  verInfo.innerHTML = `
+    <span style="display:inline-flex;align-items:center;gap:6px;">
+      Target: <strong style="color:var(--text-1);">${escHtml(ds.name)}</strong> ›
+      <span class="badge" style="background:rgba(59,130,246,.15);color:var(--accent-hi);">${escHtml(ver.name)}</span>
+      <span style="color:var(--text-3);">${ver.image_count || 0} existing images</span>
+      ${isExported ? '<span style="color:var(--warning, #eab308);font-size:10px;">⚠️ Version already exported</span>' : ''}
+    </span>`;
+}
+
+function onAddToDsDatasetChange() {
+  const dsSelect = document.getElementById("addToDsDatasetSelect");
+  const dsId = dsSelect ? dsSelect.value : "";
+  addToDsCtx.selectedDatasetId = dsId;
+  const ds = state.datasets.find(d => d.id === dsId);
+  populateVersionsForSelectedDataset(ds);
+}
+
+function onAddToDsVersionChange() {
+  const verSelect = document.getElementById("addToDsVersionSelect");
+  const verId = verSelect ? verSelect.value : "";
+  addToDsCtx.selectedVersionId = verId;
+  const ds = state.datasets.find(d => d.id === addToDsCtx.selectedDatasetId);
+  const ver = ds ? (ds.versions || []).find(v => v.id === verId) : null;
+  updateAddToDsVersionInfo(ds, ver);
+}
+
+async function quickCreateVersionForModal() {
+  const dsId = addToDsCtx.selectedDatasetId;
+  if (!dsId) {
+    alert("Please select a dataset first.");
+    return;
+  }
+  const ds = state.datasets.find(d => d.id === dsId);
+  const dsName = ds ? ds.name : "this dataset";
+  if (!confirm(`Create a new draft version for "${dsName}"?`)) return;
+  try {
+    const res = await fetch(`${API}/datasets/${state.projectId}/datasets/${dsId}/versions/create`, { method: "POST" });
+    if (!res.ok) throw new Error("Server error creating version");
+    const newVer = await res.json();
+    await fetchHome();
+    await loadDatasetsForAddToModal(dsId, newVer.id);
+  } catch (err) {
+    alert("Failed to create version: " + err.message);
+  }
+}
+
+async function loadBatchImagesForAddToModal() {
+  const el = document.getElementById("addImgList");
+  if (el) {
+    el.innerHTML = `
+      <div class="loading-state" style="padding:20px;">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">Loading annotated images...</div>
+      </div>`;
+  }
+
+  try {
+    const res = await fetch(`${API}/batches/${state.projectId}/batches/${state.activeBatchId}/images?limit=1000&status=labeled`);
+    if (res.ok) {
+      const data = await res.json();
+      addToDsCtx.allImages = data.images || [];
+      populateAddToDsTagFilterOptions(data.tag_counts || state.batchTagCounts || {});
+    } else {
+      addToDsCtx.allImages = state.images.filter(i => i.annotated);
+      populateAddToDsTagFilterOptions(state.batchTagCounts || {});
+    }
+  } catch (err) {
+    console.error("Failed to load batch images for modal:", err);
+    addToDsCtx.allImages = state.images.filter(i => i.annotated);
+    populateAddToDsTagFilterOptions(state.batchTagCounts || {});
+  }
+
+  renderFilteredAddImgList();
+}
+
+function populateAddToDsTagFilterOptions(tagCounts) {
+  const select = document.getElementById("addToDsTagFilter");
+  if (!select) return;
+
+  const totalAnnotated = (addToDsCtx.allImages || []).length;
+  let html = `<option value="">All Tags (${totalAnnotated})</option>`;
+
+  const counts = {};
+  let unTaggedCount = 0;
+  (addToDsCtx.allImages || []).forEach(img => {
+    const tags = img.tags || [];
+    if (!tags.length) {
+      unTaggedCount++;
+    } else {
+      tags.forEach(t => {
+        const clean = strCleanTag(t);
+        if (clean) counts[clean] = (counts[clean] || 0) + 1;
+      });
+    }
+  });
+
+  const sortedTags = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  sortedTags.forEach(([tag, count]) => {
+    html += `<option value="${escHtml(tag)}">#${escHtml(tag)} (${count})</option>`;
+  });
+
+  if (unTaggedCount > 0) {
+    html += `<option value="__notag__">No Tag (${unTaggedCount})</option>`;
+  }
+
+  select.innerHTML = html;
+  select.value = addToDsCtx.filterTag || "";
+}
+
+function onAddToDsTagFilterChange() {
+  const select = document.getElementById("addToDsTagFilter");
+  addToDsCtx.filterTag = select ? select.value : "";
+
+  const labelEl = document.getElementById("selectAllAddImagesLabel");
+  if (labelEl) {
+    if (addToDsCtx.filterTag === "__notag__") {
+      labelEl.textContent = "All (No Tag)";
+    } else if (addToDsCtx.filterTag) {
+      labelEl.textContent = `All (#${addToDsCtx.filterTag})`;
+    } else {
+      labelEl.textContent = "All";
+    }
+  }
+
+  const selectAll = document.getElementById("selectAllAddImages");
+  if (selectAll) selectAll.checked = true;
+
+  renderFilteredAddImgList();
+}
+
+function renderFilteredAddImgList() {
   const el = document.getElementById("addImgList");
   if (!el) return;
   el.innerHTML = "";
-  const annotated = state.images.filter(i => i.annotated);
 
-  if (!annotated.length) {
-    el.innerHTML = `<div style="font-size:12px;color:var(--text-3);padding:8px 0;">No annotated images in this batch.</div>`;
+  const filterTag = addToDsCtx.filterTag ? addToDsCtx.filterTag.toLowerCase().replace(/^#/, "") : "";
+
+  const filtered = (addToDsCtx.allImages || []).filter(img => {
+    if (!filterTag) return true;
+    const imgTags = (img.tags || []).map(t => strCleanTag(t));
+    if (filterTag === "__notag__") {
+      return imgTags.length === 0;
+    }
+    return imgTags.includes(filterTag);
+  });
+
+  if (!filtered.length) {
+    el.innerHTML = `<div style="font-size:12px;color:var(--text-3);padding:16px 8px;text-align:center;">No labeled images match the selected tag filter.</div>`;
+    updateAddImgSummary();
     return;
   }
 
-  annotated.forEach(img => {
+  const selectAll = document.getElementById("selectAllAddImages");
+  const shouldCheck = selectAll ? selectAll.checked : true;
+
+  filtered.forEach(img => {
     const row = document.createElement("label");
     row.className = "add-img-row";
-    const tagsHtml = (img.tags && img.tags.length) ? img.tags.map(t => `<span class="badge badge-tag" style="margin-left:4px;font-size:9px;">#${escHtml(t)}</span>`).join("") : "";
+    const tagsHtml = (img.tags && img.tags.length)
+      ? img.tags.map(t => `<span class="badge badge-tag" style="margin-left:4px;font-size:9px;">#${escHtml(strCleanTag(t))}</span>`).join("")
+      : "";
     row.innerHTML = `
-      <input type="checkbox" class="add-img-checkbox" value="${escHtml(img.filename)}" checked>
+      <input type="checkbox" class="add-img-checkbox" value="${escHtml(img.filename)}" ${shouldCheck ? "checked" : ""}>
       <img class="add-img-thumb" src="${API}${img.url}" alt="${escHtml(img.filename)}">
       <span class="add-img-name">${escHtml(img.filename)} ${tagsHtml}</span>
       <span class="add-img-has-ann">● labeled</span>`;
@@ -852,7 +1313,17 @@ function renderAddImgList() {
   });
 
   updateAddImgSummary();
-  el.addEventListener("change", updateAddImgSummary);
+  el.onchange = onAddImgCheckboxChange;
+}
+
+function onAddImgCheckboxChange() {
+  const allCbs = Array.from(document.querySelectorAll(".add-img-checkbox"));
+  const checkedCbs = allCbs.filter(cb => cb.checked);
+  const selectAll = document.getElementById("selectAllAddImages");
+  if (selectAll) {
+    selectAll.checked = allCbs.length > 0 && checkedCbs.length === allCbs.length;
+  }
+  updateAddImgSummary();
 }
 
 function updateAddImgSummary() {
@@ -860,14 +1331,24 @@ function updateAddImgSummary() {
   const el = document.getElementById("addImgSummary");
   if (!el) return;
 
+  const filterTag = addToDsCtx.filterTag;
+  const tagStr = filterTag ? (filterTag === "__notag__" ? "without tag" : `with tag #${filterTag}`) : "";
+
+  const checkedCbs = document.querySelectorAll(".add-img-checkbox:checked");
+  const allCbs = document.querySelectorAll(".add-img-checkbox");
+
   if (selectAll && selectAll.checked) {
-    el.innerHTML = `<span style="color:var(--accent);font-weight:600;">ALL labeled images in this entire batch</span> will be added.`;
+    if (tagStr) {
+      el.innerHTML = `<span style="color:var(--accent);font-weight:600;">ALL labeled images ${tagStr} in this batch (${checkedCbs.length})</span> will be added.`;
+    } else {
+      el.innerHTML = `<span style="color:var(--accent);font-weight:600;">ALL labeled images in this entire batch (${checkedCbs.length})</span> will be added.`;
+    }
     return;
   }
 
-  const checked = document.querySelectorAll(".add-img-checkbox:checked").length;
-  el.textContent = checked > 0
-    ? `${checked} image${checked !== 1 ? "s" : ""} from this page will be added.`
+  const checkedCount = checkedCbs.length;
+  el.textContent = checkedCount > 0
+    ? `${checkedCount} of ${allCbs.length} image${checkedCount !== 1 ? "s" : ""} selected will be added.`
     : "No images selected.";
 }
 
@@ -879,17 +1360,20 @@ function toggleSelectAllAddImages(checked) {
 async function confirmAddToDataset() {
   const { selectedDatasetId, selectedVersionId } = addToDsCtx;
   if (!selectedDatasetId || !selectedVersionId) {
-    alert("Please select a dataset version."); return;
+    alert("Please select a dataset and version."); return;
   }
-  
-  const selectAll = document.getElementById("selectAllAddImages");
-  let checked = [];
-  if (selectAll && selectAll.checked) {
-    // Send empty array to tell backend to add ALL labeled images in the batch
-    checked = [];
-  } else {
-    checked = Array.from(document.querySelectorAll(".add-img-checkbox:checked")).map(cb => cb.value);
-    if (!checked.length) { alert("Select at least one image."); return; }
+
+  const tagFilterEl = document.getElementById("addToDsTagFilter");
+  const currentTag = (tagFilterEl ? tagFilterEl.value : "") || addToDsCtx.filterTag || "";
+  const tagToSend = (currentTag && currentTag !== "__notag__") ? currentTag.replace(/^#/, "").trim() : currentTag;
+
+  // Always collect explicitly checked images from the currently displayed/filtered view
+  const checkedBoxes = Array.from(document.querySelectorAll(".add-img-checkbox:checked"));
+  const filenames = checkedBoxes.map(cb => cb.value);
+
+  if (!filenames.length) {
+    alert("Select at least one image to add.");
+    return;
   }
 
   const augChecked = Array.from(document.querySelectorAll(".aug-checkbox:checked")).map(cb => cb.value);
@@ -898,14 +1382,23 @@ async function confirmAddToDataset() {
   if (btn) { btn.disabled = true; btn.innerHTML = `<span class="spinner"></span> Adding…`; }
 
   try {
+    const payload = {
+      batch_id: state.activeBatchId,
+      filenames: filenames,
+      tag: tagToSend,
+      augmentations: augChecked,
+    };
     const r = await fetch(`${API}/datasets/${state.projectId}/datasets/${selectedDatasetId}/versions/${selectedVersionId}/add-images`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ batch_id: state.activeBatchId, filenames: checked, augmentations: augChecked }),
+      body: JSON.stringify(payload),
     });
     const result = await r.json();
+    if (!r.ok) {
+      throw new Error(result.detail || "Failed to add images");
+    }
     closeModal("addToDatasetModal");
     await fetchHome();
-    alert(`✅ Added ${result.added} images (${result.skipped} skipped — already in version or not annotated).`);
+    alert(`✅ Added ${result.added} images (${result.skipped} skipped — already in version or not matching filter).`);
   } catch (e) {
     alert("Failed to add images: " + e.message);
   } finally {
@@ -1089,20 +1582,20 @@ async function doExport() {
     }
     const data = await res.json();
     const taskId = data.task_id;
-    
+
     // Polling loop
     while (true) {
       await new Promise(r => setTimeout(r, 2000));
       const statusRes = await fetch(`${API}/export/status/${taskId}`);
       if (!statusRes.ok) throw new Error("Failed to get task status");
       const statusData = await statusRes.json();
-      
+
       if (statusData.status === "done") {
         const a = document.createElement("a");
         a.href = `${API}${statusData.download_url}`;
         a.download = `apiflow_export.zip`;
         a.click();
-        
+
         closeModal("exportModal");
         if (state.view === "version") refreshVersionView();
         else fetchHome();
@@ -1159,14 +1652,14 @@ async function fetchBatchImages(targetIndexAfterLoad = null) {
         <div class="loading-text">Loading images...</div>
       </div>`;
   }
-  
+
   const searchEl = document.getElementById("imgSearch");
   const query = searchEl ? searchEl.value.trim() : "";
   const filterEl = document.getElementById("imgStatusFilter");
   const filterStatus = filterEl ? filterEl.value : "all";
   const tagFilterEl = document.getElementById("imgTagFilter");
   const filterTag = tagFilterEl ? tagFilterEl.value : "";
-  
+
   try {
     const r = await fetch(`${API}/batches/${state.projectId}/batches/${state.activeBatchId}/images?page=${state.currentPage}&limit=${state.limit}&search=${encodeURIComponent(query)}&status=${filterStatus}&tag=${encodeURIComponent(filterTag)}`);
     const data = await r.json();
@@ -1174,7 +1667,7 @@ async function fetchBatchImages(targetIndexAfterLoad = null) {
     state.totalImages = data.total || 0;
     state.totalBatchImages = data.total_batch_images || data.total || 0;
     state.batchTagCounts = data.tag_counts || {};
-    
+
     // Register any classes and tags loaded from the image summaries
     state.images.forEach(img => {
       (img.classes || []).forEach(c => {
@@ -1206,7 +1699,7 @@ async function fetchBatchImages(targetIndexAfterLoad = null) {
     state.images = [];
     state.totalImages = 0;
   }
-  
+
   const pagEl = document.getElementById("paginationControls");
   const infoEl = document.getElementById("pageInfo");
   if (pagEl && infoEl) {
@@ -1220,7 +1713,7 @@ async function fetchBatchImages(targetIndexAfterLoad = null) {
   }
 
   renderImageList();
-  
+
   if (state.images.length > 0) {
     if (targetIndexAfterLoad === null) {
       if (state.currentImageIndex === -1) {
@@ -1267,14 +1760,14 @@ async function uploadFiles(fileList) {
 async function deleteImage(filename) {
   if (!confirm(`Delete "${filename}" and its annotations?`)) return;
   await fetch(`${API}/batches/${state.projectId}/batches/${state.activeBatchId}/images/${encodeURIComponent(filename)}`, { method: "DELETE" });
-  
+
   const idx = state.images.findIndex(i => i.filename === filename);
   let nextIdx = idx;
   if (nextIdx >= state.images.length - 1) {
     nextIdx = state.images.length - 2;
   }
   if (nextIdx < 0) nextIdx = 0;
-  
+
   await fetchBatchImages(nextIdx);
 }
 function renderImageList() {
@@ -1470,7 +1963,7 @@ async function saveAnnotations(notify = false) {
 
 function toggleNullLabel() {
   if (state.currentImageIndex === -1) return;
-  
+
   if (!state.nullLabeled) {
     // Turning ON Null Labeling: Clear any annotations first
     if (state.annotations.length > 0) {
@@ -1486,7 +1979,7 @@ function toggleNullLabel() {
     // Turning OFF Null Labeling
     state.nullLabeled = false;
   }
-  
+
   updateNullLabelButton();
   draw();
   renderAnnotationList();
@@ -1550,14 +2043,14 @@ async function navNext() {
 async function markUnlabeledAsNull() {
   if (!state.activeBatchId) return;
   if (!confirm("This will mark all currently unlabeled images in this batch as Null Labeled (No defects). Proceed?")) return;
-  
+
   if (state.currentImageIndex !== -1) {
     await saveAnnotations(false);
   }
-  
+
   const btn = document.querySelector("button[onclick='markUnlabeledAsNull()']");
   if (btn) { btn.disabled = true; btn.innerHTML = `<span class="spinner"></span> Processing…`; }
-  
+
   try {
     const r = await fetch(`${API}/batches/${state.projectId}/batches/${state.activeBatchId}/mark-unlabeled-null`, {
       method: "POST"
@@ -1568,8 +2061,8 @@ async function markUnlabeledAsNull() {
     }
     const result = await r.json();
     alert(`✅ Successfully marked ${result.marked_count} images as null labeled.`);
-    
-    state.currentImageIndex = -1; 
+
+    state.currentImageIndex = -1;
     await fetchBatchImages(0);
   } catch (e) {
     alert("Failed to mark images: " + e.message);
@@ -1823,9 +2316,9 @@ function renderAnnotationList() {
     it.onclick = (e) => {
       // Prevent selecting when clicking the delete button
       if (e.target.classList.contains("ann-del")) return;
-      state.selected = sel ? null : i; 
-      draw(); 
-      renderAnnotationList(); 
+      state.selected = sel ? null : i;
+      draw();
+      renderAnnotationList();
     };
     const color = state.classColors[ann.label] || "#3b82f6";
     it.innerHTML = `
@@ -1836,15 +2329,15 @@ function renderAnnotationList() {
         <span class="ann-badge ${ann.source === "auto" ? "ab-auto" : "ab-manual"}">${ann.source || "manual"}</span>
       </div>
       <button class="ann-del" title="Delete">✕</button>`;
-    
+
     // Explicitly add event listener to avoid capture/bubble indexing issues
     it.querySelector(".ann-del").addEventListener("click", (e) => {
       e.stopPropagation();
-      state.annotations.splice(i, 1); 
+      state.annotations.splice(i, 1);
       state.selected = null;
-      draw(); 
-      renderAnnotationList(); 
-      renderClassList(); 
+      draw();
+      renderAnnotationList();
+      renderClassList();
       saveAnnotations(false);
     });
     el.appendChild(it);
@@ -1931,13 +2424,13 @@ canvas.addEventListener("mouseup", e => {
 canvas.addEventListener("click", e => {
   if (e.button !== 0 || isSpaceDown || state.mode === "pan") return;
   const p = getImgPos(e);
-  
+
   if (state.selected !== null && state.selected >= 0 && state.selected < state.annotations.length) {
     const selAnn = state.annotations[state.selected];
     if (selAnn && selAnn._delBtn) {
       const dx = p.x - selAnn._delBtn.x;
       const dy = p.y - selAnn._delBtn.y;
-      if (Math.sqrt(dx*dx + dy*dy) <= selAnn._delBtn.r + (5 / view.scale)) {
+      if (Math.sqrt(dx * dx + dy * dy) <= selAnn._delBtn.r + (5 / view.scale)) {
         deleteSelected();
         return;
       }
@@ -1984,7 +2477,7 @@ function fitImage() {
   if (!imgObj) return;
   const cw = (canvasWrap && canvasWrap.clientWidth) || 800;
   const ch = (canvasWrap && canvasWrap.clientHeight) || 600;
-  canvas.width = cw; 
+  canvas.width = cw;
   canvas.height = ch;
   const s = Math.min((cw - 40) / imgObj.naturalWidth, (ch - 40) / imgObj.naturalHeight, 1);
   view.scale = s;
@@ -2031,21 +2524,21 @@ function drawAnnotation(ann, sel) {
     const tag = ann.label + (ann.confidence < 1 ? ` ${(ann.confidence * 100).toFixed(0)}%` : "");
     ctx.font = `bold ${13 / s}px Inter,sans-serif`;
     const tw = ctx.measureText(tag).width;
-    
+
     // background rect for label text
     const rectHeight = 18 / s;
     const paddingX = 8 / s;
     const lx = ann.bbox[0];
     const ly = ann.bbox[1] - rectHeight;
     const lw = tw + paddingX;
-    
+
     ctx.fillStyle = col;
     ctx.fillRect(lx, ly, lw, rectHeight);
-    
+
     // draw text
     ctx.fillStyle = "#fff";
     ctx.fillText(tag, lx + 4 / s, ann.bbox[1] - 5 / s);
-    
+
     ann._labelRect = [lx, ly, lw, rectHeight];
   }
   if (ann.type === "polygon" && ann.mask && ann.mask.length > 1) {
@@ -2054,10 +2547,10 @@ function drawAnnotation(ann, sel) {
     ann.mask.forEach(p => ctx.lineTo(p.x, p.y));
     ctx.closePath(); ctx.stroke();
     ctx.fillStyle = hexAlpha(col, sel ? 0.28 : 0.12); ctx.fill();
-    
+
     const cx = ann.mask.reduce((sum, p) => sum + p.x, 0) / ann.mask.length;
     const cy = ann.mask.reduce((sum, p) => sum + p.y, 0) / ann.mask.length;
-    
+
     ctx.font = `bold ${11 / s}px Inter,sans-serif`;
     const tw = ctx.measureText(ann.label).width;
     const rectHeight = 16 / s;
@@ -2066,10 +2559,10 @@ function drawAnnotation(ann, sel) {
     const ly = cy - rectHeight / 2;
     ctx.fillStyle = col;
     ctx.fillRect(lx, ly, rectWidth, rectHeight);
-    
+
     ctx.fillStyle = "#fff";
     ctx.fillText(ann.label, cx - tw / 2, cy + 4 / s);
-    
+
     ann._labelRect = [lx, ly, rectWidth, rectHeight];
     if (sel) ann.mask.forEach(p => {
       ctx.fillStyle = "#fff"; ctx.strokeStyle = col; ctx.lineWidth = 1.5 / s;
@@ -2100,7 +2593,7 @@ function drawAnnotation(ann, sel) {
       ctx.strokeStyle = "#fff";
       ctx.lineWidth = 1.5 / s;
       ctx.stroke();
-      
+
       ctx.fillStyle = "#fff";
       ctx.font = `bold ${12 / s}px Inter,sans-serif`;
       ctx.textAlign = "center";
@@ -2108,8 +2601,8 @@ function drawAnnotation(ann, sel) {
       ctx.fillText("✕", delX, delY + 1 / s);
       ctx.textAlign = "start";
       ctx.textBaseline = "alphabetic";
-      
-      ann._delBtn = {x: delX, y: delY, r: delRadius};
+
+      ann._delBtn = { x: delX, y: delY, r: delRadius };
     }
   } else {
     ann._delBtn = null;

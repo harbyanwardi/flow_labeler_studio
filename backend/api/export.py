@@ -64,7 +64,7 @@ def _gather_from_version(project_id: str, dataset_id: str, version_id: str, filt
     files  = []
     clses  = set()
 
-    normalized_tags = set(str(t).strip().lower() for t in (filter_tags or []) if str(t).strip())
+    normalized_tags = set(str(t).strip().lower().lstrip("#") for t in (filter_tags or []) if str(t).strip())
 
     for ref in refs:
         bid  = ref["batch_id"]
@@ -77,11 +77,12 @@ def _gather_from_version(project_id: str, dataset_id: str, version_id: str, filt
         try:
             d    = _rj(annp)
             anns = d.get("annotations", [])
-            if not anns and not d.get("null_labeled", False):
+            has_ann = bool(anns) or bool(d.get("null_labeled", False)) or bool(d.get("tags"))
+            if not has_ann:
                 continue
 
             img_tags = [str(t).strip() for t in d.get("tags", []) if str(t).strip()]
-            img_tags_lower = set(t.lower() for t in img_tags)
+            img_tags_lower = set(t.lower().lstrip("#") for t in img_tags)
 
             if normalized_tags:
                 if tag_mode == "all":

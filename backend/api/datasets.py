@@ -149,26 +149,81 @@ def get_version(project_id: str, dataset_id: str, version_id: str):
 
 
 @router.get("/{project_id}/datasets/{dataset_id}/versions/{version_id}/images")
-def list_version_images(project_id: str, dataset_id: str, version_id: str):
+def list_version_images(
+    project_id: str,
+    dataset_id: str,
+    version_id: str,
+    page: int = 1,
+    limit: int = 24,
+    search: str = "",
+    tag: str = ""
+):
     imgf = os.path.join(_ver_dir(project_id, dataset_id, version_id), "images.json")
     if not os.path.exists(imgf):
-        return []
-    imgs = _rj(imgf)
+        return {"images": [], "total": 0, "page": page, "limit": limit, "tag_counts": {}}
+
+    all_refs = _rj(imgf)
     batches_dir = get_batches_dir(project_id)
-    for img in imgs:
-        annp = os.path.join(batches_dir, img["batch_id"], "annotations", f"{img['filename']}.json")
-        img["annotated"] = os.path.exists(annp)
-        img["url"]       = f"/storage/projects/{project_id}/batches/{img['batch_id']}/images/{img['filename']}"
-        tags = []
+
+    # 1. Filter by search if provided
+    search_lower = search.strip().lower() if search else ""
+    if search_lower:
+        all_refs = [r for r in all_refs if search_lower in r.get("filename", "").lower()]
+
+    # 2. Tag counts & tag filtering
+    clean_filter_tag = tag.strip().lower().lstrip("#") if tag else ""
+    tag_counts = {}
+    filtered_refs = []
+
+    for r in all_refs:
+        bid = r.get("batch_id", "")
+        fn = r.get("filename", "")
+        annp = os.path.join(batches_dir, bid, "annotations", f"{fn}.json")
+        img_tags = []
+        is_annotated = False
         if os.path.exists(annp):
             try:
                 with open(annp, "r", encoding="utf-8") as f:
                     d = json.load(f)
-                    tags = d.get("tags", [])
+                    raw_tags = d.get("tags", [])
+                    img_tags = [str(t).strip().lower().lstrip("#") for t in raw_tags if str(t).strip()]
+                    is_annotated = bool(d.get("annotations")) or bool(d.get("null_labeled", False)) or bool(raw_tags)
+                    for t in img_tags:
+                        tag_counts[t] = tag_counts.get(t, 0) + 1
             except Exception:
                 pass
-        img["tags"] = tags
-    return imgs
+
+        if clean_filter_tag:
+            if clean_filter_tag == "__notag__":
+                if len(img_tags) > 0:
+                    continue
+            else:
+                if clean_filter_tag not in img_tags:
+                    continue
+
+        r_copy = dict(r)
+        r_copy["annotated"] = is_annotated
+        r_copy["tags"] = img_tags
+        r_copy["url"] = f"/storage/projects/{project_id}/batches/{bid}/images/{fn}"
+        filtered_refs.append(r_copy)
+
+    total = len(filtered_refs)
+
+    # 3. Paginate
+    if limit > 0:
+        start = max(0, (page - 1) * limit)
+        end = start + limit
+        page_images = filtered_refs[start:end]
+    else:
+        page_images = filtered_refs
+
+    return {
+        "images": page_images,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "tag_counts": tag_counts
+    }
 
 
 @router.get("/{project_id}/datasets/{dataset_id}/versions/{version_id}/tags")
@@ -193,11 +248,12 @@ def get_version_tags(project_id: str, dataset_id: str, version_id: str):
         try:
             with open(annp, "r", encoding="utf-8") as f:
                 d = json.load(f)
-                if not d.get("annotations") and not d.get("null_labeled", False):
+                has_ann = bool(d.get("annotations")) or bool(d.get("null_labeled", False)) or bool(d.get("tags"))
+                if not has_ann:
                     continue
                 valid_count += 1
                 for t in d.get("tags", []):
-                    t_clean = str(t).strip()
+                    t_clean = str(t).strip().lower().lstrip("#")
                     if t_clean:
                         tag_counts[t_clean] = tag_counts.get(t_clean, 0) + 1
         except Exception:
@@ -231,6 +287,8 @@ def add_images_to_version(project_id: str, dataset_id: str, version_id: str, bod
     batch_id  = body.get("batch_id", "")
     filenames = body.get("filenames", [])
     augmentations = body.get("augmentations", [])
+    raw_tag = body.get("tag", "")
+    filter_tag = raw_tag.strip().lower().lstrip("#") if raw_tag else ""
 
     batches_dir = get_batches_dir(project_id)
     batch_img_dir = os.path.join(batches_dir, batch_id, "images")
@@ -251,8 +309,20 @@ def add_images_to_version(project_id: str, dataset_id: str, version_id: str, bod
             skipped.append(fn); continue
         try:
             d = _rj(annp)
-            if not d.get("annotations") and not d.get("null_labeled", False):
+            has_ann = bool(d.get("annotations")) or bool(d.get("null_labeled", False)) or bool(d.get("tags"))
+            if not has_ann:
                 skipped.append(fn); continue
+
+            # Enforce filter_tag on every candidate if a tag filter is specified
+            if filter_tag:
+                raw_tags = d.get("tags", [])
+                img_tags = [str(t).strip().lower().lstrip("#") for t in raw_tags if str(t).strip()]
+                if filter_tag == "__notag__":
+                    if len(img_tags) > 0:
+                        skipped.append(fn); continue
+                else:
+                    if filter_tag not in img_tags:
+                        skipped.append(fn); continue
         except Exception:
             skipped.append(fn); continue
             

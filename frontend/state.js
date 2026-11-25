@@ -54,10 +54,16 @@ const state = {
   datasets: [],           // full list from server
 
   // ── ACTIVE VERSION VIEW ───────────────────────────────────────────
-  activeDatasetId:  null,
-  activeVersionId:  null,
-  versionImages:    [],   // image refs in current version
-  versionMeta:      null, // version meta (includes exports log)
+  activeDatasetId:    null,
+  activeVersionId:    null,
+  versionImages:      [],   // image refs in current page of version
+  versionMeta:        null, // version meta (includes exports log)
+  versionCurrentPage: 1,
+  versionLimit:       24,
+  versionTotalImages: 0,
+  versionSearch:      "",
+  versionTagFilter:   "",
+  versionTagCounts:   {},
 };
 
 const view = { scale: 1, offsetX: 0, offsetY: 0 };

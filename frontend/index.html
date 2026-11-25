@@ -113,20 +113,24 @@
                 <span id="imagesCountBadge" style="font-size:11px;color:var(--accent-hi);font-weight:600;">0</span>
               </div>
               <div id="paginationControls" style="display:none;gap:6px;align-items:center;font-size:12px;">
-                <button class="btn" style="padding:2px 8px;font-size:11px;min-height:unset;" onclick="changePage(-1)">&lt;</button>
+                <button class="btn" style="padding:2px 8px;font-size:11px;min-height:unset;"
+                  onclick="changePage(-1)">&lt;</button>
                 <span id="pageInfo" style="color:var(--text-2);font-weight:500;">1/1</span>
-                <button class="btn" style="padding:2px 8px;font-size:11px;min-height:unset;" onclick="changePage(1)">&gt;</button>
+                <button class="btn" style="padding:2px 8px;font-size:11px;min-height:unset;"
+                  onclick="changePage(1)">&gt;</button>
               </div>
             </div>
             <input type="text" id="imgSearch" class="input-search" placeholder="Search filename…"
               oninput="handleSearchInput()">
             <div style="display:flex; margin-top: 6px; gap: 6px;">
-              <select id="imgStatusFilter" class="input-search" style="padding: 4px; font-size: 11px; flex: 1;" onchange="handleSearchInput()">
+              <select id="imgStatusFilter" class="input-search" style="padding: 4px; font-size: 11px; flex: 1;"
+                onchange="handleSearchInput()">
                 <option value="all">All Status</option>
                 <option value="unlabeled">Unlabeled</option>
                 <option value="labeled">Labeled</option>
               </select>
-              <select id="imgTagFilter" class="input-search" style="padding: 4px; font-size: 11px; flex: 1;" onchange="handleSearchInput()">
+              <select id="imgTagFilter" class="input-search" style="padding: 4px; font-size: 11px; flex: 1;"
+                onchange="handleSearchInput()">
                 <option value="">All Tags</option>
               </select>
             </div>
@@ -150,12 +154,13 @@
               <button class="tool-btn" onclick="resetView()" title="Fit [R]">⟲</button>
               <button class="tool-btn btn-ghost" onclick="clearAllAnnotations()" title="Clear all">🗑</button>
             </div>
-             <div class="class-select-wrap">
+            <div class="class-select-wrap">
               <label>Class</label>
               <select id="classSelect" onchange="setCurrentClass(this.value)"></select>
             </div>
             <div class="toolbar-sep"></div>
-            <button id="btnNullLabel" class="btn btn-sm btn-ghost" onclick="toggleNullLabel()" title="Mark as Empty/Null labeled" style="border: 1px dashed var(--border-hi);">✓ Null Label</button>
+            <button id="btnNullLabel" class="btn btn-sm btn-ghost" onclick="toggleNullLabel()"
+              title="Mark as Empty/Null labeled" style="border: 1px dashed var(--border-hi);">✓ Null Label</button>
           </div>
 
           <div class="canvas-wrap" id="canvasWrap" tabindex="0">
@@ -182,7 +187,8 @@
         <aside class="sidebar sidebar-right">
           <div class="sidebar-section">
             <span class="sidebar-section-title" style="display:block;margin-bottom:9px;">Classes</span>
-            <div id="classListEl" style="max-height: 200px; overflow-y: auto; padding-right: 4px; margin-bottom: 8px;"></div>
+            <div id="classListEl" style="max-height: 200px; overflow-y: auto; padding-right: 4px; margin-bottom: 8px;">
+            </div>
             <div class="add-cls-form">
               <input type="text" id="newClassInput" class="add-cls-input" placeholder="New class…">
               <button class="btn btn-sm btn-primary" onclick="handleAddClass()">Add</button>
@@ -197,7 +203,8 @@
               <!-- rendered by JS -->
             </div>
             <div class="add-cls-form">
-              <input type="text" id="newTagInput" class="add-cls-input" placeholder="New tag or select…" list="projectTagsDatalist" onkeydown="if(event.key==='Enter'){handleAddTag();event.preventDefault();}">
+              <input type="text" id="newTagInput" class="add-cls-input" placeholder="New tag or select…"
+                list="projectTagsDatalist" onkeydown="if(event.key==='Enter'){handleAddTag();event.preventDefault();}">
               <datalist id="projectTagsDatalist"></datalist>
               <button class="btn btn-sm btn-primary" onclick="handleAddTag()">+ Tag</button>
             </div>
@@ -254,11 +261,46 @@
             </div>
           </div>
 
-          <!-- Image grid -->
-          <div class="version-img-grid" id="versionImgGrid">
-            <div class="empty-state" style="grid-column:1/-1;">
-              <div class="empty-icon">🖼️</div>
-              No images added yet. Go to a batch and click "Add to Dataset".
+          <!-- Version Toolbar & Pagination -->
+          <div class="version-toolbar" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <input type="text" id="versionImgSearch" class="input-search" placeholder="Search filename…"
+                style="width:200px; padding:5px 10px; font-size:12px;" oninput="handleVersionSearchInput()">
+              <select id="versionImgTagFilter" class="form-select form-select-sm" style="padding:4px 8px; font-size:12px; height:30px; width:auto;" onchange="handleVersionTagFilterChange()">
+                <option value="">All Tags</option>
+              </select>
+            </div>
+
+            <!-- Pagination Controls -->
+            <div id="versionPagination" style="display:flex; align-items:center; gap:8px; font-size:12px;">
+              <span id="versionPageInfo" style="color:var(--text-2); font-weight:500;">Page 1 of 1 (0 images)</span>
+              <div style="display:flex; gap:4px;">
+                <button class="btn btn-sm" id="versionPrevBtn" onclick="changeVersionPage(-1)" title="Previous page">&lt; Prev</button>
+                <button class="btn btn-sm" id="versionNextBtn" onclick="changeVersionPage(1)" title="Next page">Next &gt;</button>
+              </div>
+              <select id="versionLimitSelect" class="form-select form-select-sm" style="padding:2px 6px; font-size:11px; height:26px; width:auto;" onchange="changeVersionLimit(this.value)">
+                <option value="24" selected>24 / page</option>
+                <option value="48">48 / page</option>
+                <option value="96">96 / page</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Image grid container with loader overlay -->
+          <div style="position:relative; min-height:220px; flex:1;">
+            <!-- Loader Overlay -->
+            <div id="versionGridLoader" class="loading-state" style="display:none; position:absolute; inset:0; z-index:10; background:rgba(15, 23, 42, 0.75); backdrop-filter:blur(3px); border-radius:var(--radius-md); flex-direction:column; justify-content:center; align-items:center; gap:10px;">
+              <div class="loading-spinner" style="width:36px; height:36px; border-width:3px;"></div>
+              <div id="versionLoaderText" class="loading-text" style="font-size:13px; font-weight:600; color:var(--text-1);">Loading images...</div>
+              <div id="versionLoaderProgress" style="font-size:11px; color:var(--text-3);">Please wait until all thumbnails are loaded</div>
+            </div>
+
+            <!-- Image grid -->
+            <div class="version-img-grid" id="versionImgGrid">
+              <div class="empty-state" style="grid-column:1/-1;">
+                <div class="empty-icon">🖼️</div>
+                No images added yet. Go to a batch and click "Add to Dataset".
+              </div>
             </div>
           </div>
         </div>
@@ -345,54 +387,91 @@
 
         <!-- Step 1: pick dataset + version -->
         <div class="form-group">
-          <label class="form-label">Select Dataset &amp; Version</label>
-          <div id="addToDsDatasetList"
-            style="display:flex;flex-direction:column;gap:6px;max-height:160px;overflow-y:auto;">
-            <!-- rendered by JS -->
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <label class="form-label" style="margin:0;">Select Dataset &amp; Version</label>
+            <div style="display:flex; gap:6px;">
+              <button type="button" class="btn btn-sm btn-ghost" onclick="openNewDatasetModal()">+ Create New
+                Dataset</button>
+              <button type="button" class="btn btn-sm btn-ghost" id="addToDsNewVerBtn"
+                onclick="quickCreateVersionForModal()" style="display:none;">+ New Version</button>
+            </div>
           </div>
-          <button class="btn btn-sm btn-ghost" style="margin-top:6px;" onclick="openNewDatasetModal()">+ Create New
-            Dataset</button>
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+            <div>
+              <label
+                style="font-size:11px; color:var(--text-3); display:block; margin-bottom:3px; font-weight:600;">Dataset</label>
+              <select id="addToDsDatasetSelect" class="form-select" onchange="onAddToDsDatasetChange()">
+                <option value="">Loading datasets...</option>
+              </select>
+            </div>
+            <div>
+              <label
+                style="font-size:11px; color:var(--text-3); display:block; margin-bottom:3px; font-weight:600;">Version</label>
+              <select id="addToDsVersionSelect" class="form-select" onchange="onAddToDsVersionChange()">
+                <option value="">Select a dataset first</option>
+              </select>
+            </div>
+          </div>
+          <div id="addToDsVersionInfo" style="margin-top:6px; font-size:11px; color:var(--text-3);"></div>
         </div>
 
         <!-- Step 2: images to add -->
         <div class="form-group" id="addImgSelectionGroup">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+          <div
+            style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;gap:8px;flex-wrap:wrap;">
             <label class="form-label" style="margin:0;">Select Images (annotated only)</label>
-            <label style="font-size:11px;color:var(--accent-hi);cursor:pointer;">
-              <input type="checkbox" id="selectAllAddImages" onchange="toggleSelectAllAddImages(this.checked)"
-                style="accent-color:var(--accent);margin-right:4px;">
-              All
-            </label>
+            <div style="display:flex;align-items:center;gap:12px;">
+              <div style="display:flex;align-items:center;gap:6px;">
+                <span style="font-size:11px;color:var(--text-3);font-weight:600;">Filter Tag:</span>
+                <select id="addToDsTagFilter" class="form-select"
+                  style="padding:2px 8px;font-size:11px;height:28px;width:auto;min-width:130px;"
+                  onchange="onAddToDsTagFilterChange()">
+                  <option value="">All Tags</option>
+                </select>
+              </div>
+              <label
+                style="font-size:11px;color:var(--accent-hi);cursor:pointer;display:flex;align-items:center;margin:0;user-select:none;">
+                <input type="checkbox" id="selectAllAddImages" onchange="toggleSelectAllAddImages(this.checked)"
+                  style="accent-color:var(--accent);margin-right:4px;">
+                <span id="selectAllAddImagesLabel">All</span>
+              </label>
+            </div>
           </div>
-          <div class="add-img-list" id="addImgList">
+          <div class="add-img-list" id="addImgList" style="max-height:220px;overflow-y:auto;">
             <!-- rendered by JS -->
           </div>
         </div>
-        
+
         <!-- Step 3: Augmentations -->
         <div class="form-group" style="margin-top: 15px;">
           <label class="form-label" style="margin-bottom:6px;">Augmentations (Generates extra copies)</label>
           <div style="display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; color: var(--text-2);">
             <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
-              <input type="checkbox" class="aug-checkbox" value="flip_h" style="accent-color:var(--accent);"> Flip Horizontal
+              <input type="checkbox" class="aug-checkbox" value="flip_h" style="accent-color:var(--accent);"> Flip
+              Horizontal
             </label>
             <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
-              <input type="checkbox" class="aug-checkbox" value="flip_v" style="accent-color:var(--accent);"> Flip Vertical
+              <input type="checkbox" class="aug-checkbox" value="flip_v" style="accent-color:var(--accent);"> Flip
+              Vertical
             </label>
             <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
               <input type="checkbox" class="aug-checkbox" value="rot_90" style="accent-color:var(--accent);"> Rotate 90°
             </label>
             <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
-              <input type="checkbox" class="aug-checkbox" value="bright_up" style="accent-color:var(--accent);"> Brightness +
+              <input type="checkbox" class="aug-checkbox" value="bright_up" style="accent-color:var(--accent);">
+              Brightness +
             </label>
             <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
-              <input type="checkbox" class="aug-checkbox" value="bright_dn" style="accent-color:var(--accent);"> Brightness -
+              <input type="checkbox" class="aug-checkbox" value="bright_dn" style="accent-color:var(--accent);">
+              Brightness -
             </label>
             <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
-              <input type="checkbox" class="aug-checkbox" value="sat_up" style="accent-color:var(--accent);"> Saturation +
+              <input type="checkbox" class="aug-checkbox" value="sat_up" style="accent-color:var(--accent);"> Saturation
+              +
             </label>
             <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
-              <input type="checkbox" class="aug-checkbox" value="sat_dn" style="accent-color:var(--accent);"> Saturation -
+              <input type="checkbox" class="aug-checkbox" value="sat_dn" style="accent-color:var(--accent);"> Saturation
+              -
             </label>
           </div>
         </div>
@@ -432,12 +511,16 @@
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
             <label class="form-label" style="margin:0;">Filter by Tags (Optional)</label>
             <div style="display:flex; gap:8px;">
-              <button type="button" class="btn btn-sm btn-ghost" style="padding:1px 6px; font-size:10px; min-height:unset;" onclick="selectAllExportTags()">Select All</button>
-              <button type="button" class="btn btn-sm btn-ghost" style="padding:1px 6px; font-size:10px; min-height:unset;" onclick="clearExportTags()">Clear</button>
+              <button type="button" class="btn btn-sm btn-ghost"
+                style="padding:1px 6px; font-size:10px; min-height:unset;" onclick="selectAllExportTags()">Select
+                All</button>
+              <button type="button" class="btn btn-sm btn-ghost"
+                style="padding:1px 6px; font-size:10px; min-height:unset;" onclick="clearExportTags()">Clear</button>
             </div>
           </div>
           <div style="font-size:11px; color:var(--text-3); margin-bottom:6px;">
-            Select one or more tags to filter which images are exported. If no tags are selected, all images will be exported.
+            Select one or more tags to filter which images are exported. If no tags are selected, all images will be
+            exported.
           </div>
           <div class="export-tags-wrap">
             <div class="export-tags-grid" id="exportTagsGrid">
@@ -447,10 +530,12 @@
           <div style="display:flex; gap:16px; align-items:center; font-size:11px; color:var(--text-2); margin-top:6px;">
             <span style="font-weight:600;">Filter match mode:</span>
             <label style="cursor:pointer; display:flex; align-items:center; gap:4px;">
-              <input type="radio" name="exportTagMode" value="any" checked onchange="onExportTagSelectionChange()"> Any selected tag (OR)
+              <input type="radio" name="exportTagMode" value="any" checked onchange="onExportTagSelectionChange()"> Any
+              selected tag (OR)
             </label>
             <label style="cursor:pointer; display:flex; align-items:center; gap:4px;">
-              <input type="radio" name="exportTagMode" value="all" onchange="onExportTagSelectionChange()"> All selected tags (AND)
+              <input type="radio" name="exportTagMode" value="all" onchange="onExportTagSelectionChange()"> All selected
+              tags (AND)
             </label>
           </div>
         </div>
@@ -550,8 +635,8 @@
   </div>
 
   <!-- SCRIPTS -->
-  <script src="static/state.js?v=5"></script>
-  <script src="static/canvas.js?v=5"></script>
+  <script src="static/state.js?v=8"></script>
+  <script src="static/canvas.js?v=8"></script>
 </body>
 
 </html>
